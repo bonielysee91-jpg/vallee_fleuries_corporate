@@ -41,7 +41,15 @@ export type PaymentMethod =
   | 'VISA_MASTERCARD'
   | 'BANK_TRANSFER';
 
-export type TransactionStatus = 'PENDING' | 'PROCESSING' | 'SUCCESSFUL' | 'COMPLETED' | 'FAILED' | 'REFUNDED';
+export type TransactionStatus =
+  | 'PENDING'
+  | 'PROCESSING'
+  | 'SUCCESSFUL'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'REFUNDED'
+  | 'INSUFFICIENT_FUNDS'
+  | 'TECHNICAL_ERROR';
 
 export type TransactionPurpose = 
   | 'SHORT_STAY_BOOKING'

@@ -98,6 +98,8 @@ enum TransactionStatus {
   SUCCESSFUL
   FAILED
   REFUNDED
+  INSUFFICIENT_FUNDS  // Solde insuffisant signalé par l'opérateur (Wave / Orange / MTN / Moov)
+  TECHNICAL_ERROR     // Échec réseau ou coupure API de l'opérateur
 }
 
 enum TransactionPurpose {
@@ -195,7 +197,11 @@ model Property {
   keyMoneyFcfa    Int               @default(0) // Pas de porte éventuel (FCFA)
   serviceChargeFcfa Int             @default(0) // Charges de copropriété mensuelles
   cleaningFeeFcfa Int               @default(0) // Frais de ménage (résidences meublées)
+  agencyFileFeeFcfa Int             @default(0) // Frais de dossier de visite / ouverture de dossier agence
   isNegotiable    Boolean           @default(false)
+
+  // Titre foncier & conformité
+  propertyTitleType String?         // "ACD", "TITRE_FONCIER", "LETTRE_ATTRIBUTION", "BAIL" (facultatif, non certifié)
 
   // Geographical Location - the 4 certified Ivorian rental hubs
   city            String            @default("Abidjan") // Abidjan, Yamoussoukro, Bouaké, Assinie
@@ -434,6 +440,7 @@ model Transaction {
   property            Property?          @relation(fields: [propertyId], references: [id])
   booking             Booking?           @relation(fields: [bookingId], references: [id])
   lease               LeaseAgreement?    @relation(fields: [leaseId], references: [id])
+  errorLogs           PaymentErrorLog[]
 
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
@@ -442,6 +449,21 @@ model Transaction {
   @@index([userId])
   @@index([status])
   @@index([paymentMethod])
+}
+
+// Journaux d'erreurs de paiement capturés depuis les webhooks opérateurs
+// (Wave / Orange Money / MTN MoMo / Moov Money) pour diagnostic et relance.
+model PaymentErrorLog {
+  id            String      @id @default(uuid())
+  transactionId String
+  errorMessage  String
+  isResolved    Boolean     @default(false)
+  createdAt     DateTime    @default(now())
+
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@index([transactionId])
+  @@index([isResolved])
 }
 
 // User Saved Favorites
