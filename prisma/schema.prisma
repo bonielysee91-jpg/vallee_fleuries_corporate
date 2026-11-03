@@ -1,0 +1,565 @@
+// Prisma Schema for Vallées Fleuries Corporate (VFC)
+// High-Performance Ivorian Real Estate SaaS Platform - EXCLUSIVELY PROPERTY RENTALS
+// Database: Neon PostgreSQL Serverless (@neondatabase/serverless / @prisma/adapter-neon)
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// User Roles & RBAC Matrix
+enum UserRole {
+  TENANT        // Client / Locataire à la recherche de logement
+  OWNER         // Bailleur / Propriétaire de biens locatifs
+  AGENT         // Gestionnaire d'agence immobilière
+  ADMIN         // Super Admin Vallées Fleuries Corporate Command Center
+  SUPER_ADMIN   // Direction Générale VFC
+}
+
+// Strictly Rental Categories: Long-Term vs Short-Term Furnished
+enum RentalCategory {
+  LONG_TERM_RENT       // Location Longue Durée (Nue ou Meublée au bail 1 an+)
+  SHORT_TERM_FURNISHED // Résidence Meublée de Prestige (Séjours courts: nuit / semaine)
+}
+
+// Property Types dedicated exclusively to residences & commercial rentals (NO land parcels)
+enum PropertyType {
+  APARTMENT   // Appartement de standing
+  VILLA       // Villa individuelle avec jardin/piscine
+  STUDIO      // Studio moderne meublé ou non
+  DUPLEX      // Duplex / Triplex familial
+  PENTHOUSE   // Penthouse avec vue panoramique
+  COMMERCIAL  // Local commercial / Bureaux corporate
+}
+
+enum PropertyStatus {
+  AVAILABLE           // Disponible immédiatement
+  OCCUPIED            // Actuellement loué
+  RESERVED            // Réservation / Signature en cours
+  UNDER_MAINTENANCE   // En rénovation / Entretien
+  PENDING_REVIEW      // En attente de validation d'agence
+  PUBLISHED           // Annonce validée et visible au catalogue
+  RENTED              // Baillé (bail longue durée signé)
+}
+
+enum FurnishingStatus {
+  UNFURNISHED // Non meublé (Vide)
+  SEMI_FURNISHED // Semi-meublé (Cuisine équipée, placards)
+  FULLY_FURNISHED // Entièrement meublé & équipé haut standing
+}
+
+// Sécurité foncière & locative — pièce justificative fournie par le bailleur (contexte RCI)
+enum LandTitleType {
+  TITRE_FONCIER      // Titre Foncier (TF) — sécurisation maximale
+  ACD                // Arrêté de Concession Définitive
+  CERTIFICAT_FONCIER // Certificat Foncier (domaine coutumier)
+  CONTRAT_BAIL       // Contrat de bail notarié
+  NON_COMMUNIQUE     // Bailleur n'a pas encore transmis la pièce
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum LeaseStatus {
+  DRAFT
+  PENDING_SIGNATURE
+  ACTIVE
+  TERMINATED
+  EXPIRED
+}
+
+enum VisitStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+enum VisitType {
+  IN_PERSON    // Visite physique guidée sur site
+  VIRTUAL_3D   // Visite immersive 3D / Visio guidée
+}
+
+enum PaymentMethod {
+  WAVE            // Wave Côte d'Ivoire
+  ORANGE_MONEY    // Orange Money CI
+  MTN_MOMO        // MTN Mobile Money CI
+  MOOV_MONEY      // Moov Money CI
+  CARD_CINETPAY   // Carte Bancaire Visa/Mastercard via CinetPay
+  CARD_PAYSTACK   // Carte Bancaire Visa/Mastercard via Paystack
+  BANK_TRANSFER   // Virement bancaire corporate
+}
+
+enum TransactionStatus {
+  PENDING
+  PROCESSING
+  SUCCESSFUL
+  FAILED
+  REFUNDED
+  INSUFFICIENT_FUNDS // Compte / portefeuille Mobile Money sans provisions
+  TECHNICAL_ERROR    // Erreur technique passerelle (timeout, indisponibilité opérateur)
+}
+
+enum TransactionPurpose {
+  SHORT_STAY_BOOKING     // Réservation résidence meublée
+  MOVE_IN_PACKAGE        // Caution + Avance + Honoraires d'entrée
+  MONTHLY_RENT           // Paiement loyer mensuel
+  VISIT_FEE              // Frais de visite / dossier
+  SECURITY_DEPOSIT       // Dépôt de garantie
+}
+
+// -------------------------------------------------------------
+// CORE MODELS
+// -------------------------------------------------------------
+
+model User {
+  id              String            @id @default(uuid())
+  email           String            @unique
+  phoneNumber     String            @unique // Format standard Ivoirien: +225XXXXXXXXXX
+  fullName        String
+  passwordHash    String?           // Hash sécurisé PBKDF2 / Bcrypt
+  role            UserRole          @default(TENANT)
+  avatarUrl       String?
+  companyName     String?           // Pour bailleurs institutionnels ou entreprises
+  isKycVerified   Boolean           @default(false)
+  isBanned        Boolean           @default(false) // Suspension par le Super-Admin
+  banReason       String?
+  kycDocumentUrl  String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  // Relations
+  ownedProperties  Property[]        @relation("OwnerProperties")
+  managedProperties Property[]       @relation("AgentProperties")
+  bookings        Booking[]         // Réservations de séjours courts
+  leasesAsTenant  LeaseAgreement[]  @relation("TenantLeases")
+  leasesAsOwner   LeaseAgreement[]  @relation("OwnerLeases")
+  visitsScheduled VisitAppointment[] @relation("TenantVisits")
+  transactions    Transaction[]
+  favorites       SavedFavorite[]
+  reviewsWritten  Review[]
+  sessions        Session[]
+  otpVerifications OTPVerification[]
+  auditLogs       AuditLog[]
+
+  @@index([role])
+  @@index([phoneNumber])
+  @@index([email])
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  userId       String
+  token        String   @unique
+  userAgent    String?
+  ipAddress    String?
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+}
+
+model OTPVerification {
+  id          String   @id @default(uuid())
+  phoneNumber String
+  codeHash    String
+  purpose     String   // "LOGIN", "REGISTER", "PASSWORD_RESET"
+  expiresAt   DateTime
+  verified    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([phoneNumber, verified])
+}
+
+model Property {
+  id              String            @id @default(uuid())
+  title           String
+  slug            String            @unique
+  description     String
+  category        RentalCategory    @default(LONG_TERM_RENT)
+  type            PropertyType
+  status          PropertyStatus    @default(AVAILABLE)
+  furnishing      FurnishingStatus  @default(UNFURNISHED)
+
+  // Financial Breakdown (XOF / FCFA)
+  priceFcfa       Int               // Montant en FCFA (Loyer mensuel ou Tarif nuit)
+  depositMonths   Int               @default(2) // Caution légale Ivoirienne (Standard 2 mois)
+  advanceMonths   Int               @default(2) // Avance légale Ivoirienne (Standard 2 mois)
+  agencyFeeMonths Int               @default(1) // Honoraires d'agence (Standard 1 mois)
+  keyMoneyFcfa    Int               @default(0) // Pas de porte éventuel (FCFA)
+  serviceChargeFcfa Int             @default(0) // Charges de copropriété mensuelles
+  cleaningFeeFcfa Int               @default(0) // Frais de ménage (résidences meublées)
+  isNegotiable    Boolean           @default(false)
+
+  // Geographical Location - the 4 certified Ivorian rental hubs
+  city            String            @default("Abidjan") // Abidjan, Yamoussoukro, Bouaké, Assinie
+  commune         String            // Cocody, Marcory, Plateau, Riviera, Bouaké Air France...
+  neighborhood    String            // Riviera Golf, Zone 4, Deux-Plateaux Vallons, Km 12...
+  address         String
+  latitude        Float             // Coordonnées GPS pour le split-screen map
+  longitude       Float
+
+  // Structural Specs
+  surfaceM2       Int
+  bedrooms        Int
+  bathrooms       Int
+  floorNumber     Int?
+  totalFloors     Int?
+  hasElevator     Boolean           @default(false)
+  hasGenerator    Boolean           @default(false) // Groupe électrogène
+  hasWaterReserve Boolean           @default(false) // Cuve réserve d'eau SODECI
+  hasSwimmingPool Boolean           @default(false)
+  hasSecurity247  Boolean           @default(true)  // Gardiennage 24/7
+  hasFiberInternet Boolean          @default(false) // Fibre optique
+
+  // 360 / Virtual tour url
+  virtualTourUrl  String?
+
+  // Sécurité foncière & locative (élément capital en Côte d'Ivoire)
+  landTitleType     LandTitleType @default(NON_COMMUNIQUE) // Pièce justificative fournie par le bailleur
+  agencyFileFeeFcfa Int           @default(0) // Frais de dossier / de visite facturés par l'agence (FCFA)
+
+  // Relations
+  ownerId         String
+  owner           User              @relation("OwnerProperties", fields: [ownerId], references: [id])
+  agentId         String?
+  agent           User?             @relation("AgentProperties", fields: [agentId], references: [id])
+  
+  images          PropertyImage[]
+  amenities       PropertyAmenity[]
+  bookings        Booking[]
+  leases          LeaseAgreement[]
+  visits          VisitAppointment[]
+  favorites       SavedFavorite[]
+  reviews         Review[]
+  transactions    Transaction[]
+  paymentErrorLogs PaymentErrorLog[]
+
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([category, status])
+  @@index([city, commune])
+  @@index([priceFcfa])
+  @@index([ownerId])
+  @@index([latitude, longitude])
+}
+
+model PropertyImage {
+  id          String   @id @default(uuid())
+  propertyId  String
+  url         String
+  caption     String?
+  isCover     Boolean  @default(false)
+  displayOrder Int     @default(0)
+  createdAt   DateTime @default(now())
+
+  property    Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId])
+}
+
+model Amenity {
+  id          String            @id @default(uuid())
+  code        String            @unique // "SWIMMING_POOL", "GENERATOR", "WATER_TANK", "AC", "FIBER"
+  name        String            // "Piscine privée", "Groupe électrogène automatique"
+  category    String            // "SECURITY", "COMFORT", "LUXURY", "CONNECTIVITY"
+  iconName    String
+  properties  PropertyAmenity[]
+}
+
+model PropertyAmenity {
+  propertyId String
+  amenityId  String
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  amenity    Amenity  @relation(fields: [amenityId], references: [id], onDelete: Cascade)
+
+  @@id([propertyId, amenityId])
+  @@index([amenityId])
+}
+
+// -------------------------------------------------------------
+// IVORIAN GEOGRAPHY — 4 certified rental hubs (Abidjan, Yamoussoukro, Bouaké, Assinie).
+// Normalised reference tables that drive every city / commune / neighbourhood filter
+// offered by the catalogue and the publication wizard.
+// -------------------------------------------------------------
+model City {
+  id          String    @id @default(uuid())
+  code        String    @unique // "ABIDJAN", "YAMOUSSOUKRO", "BOUAKE", "ASSINIE"
+  name        String    @unique
+  region      String    // "Lagunes", "Vallée du Bandama", "Lacs", "Comoé"
+  description String?
+  latitude    Float
+  longitude   Float
+  communes    Commune[]
+  createdAt   DateTime  @default(now())
+
+  @@index([name])
+}
+
+model Commune {
+  id            String         @id @default(uuid())
+  code          String         @unique // "COCODY", "MARCORY", "BOUAKE_AIR_FRANCE"
+  name          String
+  cityId        String
+  city          City           @relation(fields: [cityId], references: [id], onDelete: Cascade)
+  neighborhoods Neighborhood[]
+  createdAt     DateTime       @default(now())
+
+  @@unique([cityId, name])
+  @@index([cityId])
+}
+
+model Neighborhood {
+  id        String   @id @default(uuid())
+  name      String
+  communeId String
+  commune   Commune  @relation(fields: [communeId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([communeId, name])
+  @@index([communeId])
+}
+
+// Short-stay Furnished Residence Bookings (Daily/Weekly Calendar stays)
+model Booking {
+  id              String         @id @default(uuid())
+  bookingNumber   String         @unique // e.g. "VFC-BK-2026-0042"
+  propertyId      String
+  tenantId        String
+  checkInDate     DateTime
+  checkOutDate    DateTime
+  numberOfNights  Int
+  numberOfGuests  Int            @default(1)
+  nightlyRateFcfa Int
+  totalAmountFcfa Int
+  cleaningFeeFcfa Int            @default(0)
+  status          BookingStatus  @default(PENDING)
+  specialRequests String?
+
+  property        Property       @relation(fields: [propertyId], references: [id])
+  tenant          User           @relation(fields: [tenantId], references: [id])
+  transactions    Transaction[]
+
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([propertyId, checkInDate, checkOutDate])
+  @@index([tenantId])
+  @@index([status])
+}
+
+// Long-term Certified Rental Lease Agreements (Bail d'Habitation Conforme Côte d'Ivoire)
+model LeaseAgreement {
+  id                String         @id @default(uuid())
+  leaseNumber       String         @unique // e.g. "VFC-BAIL-2026-018"
+  propertyId        String
+  tenantId          String
+  ownerId           String
+  
+  startDate         DateTime
+  endDate           DateTime
+  monthlyRentFcfa   Int
+  depositAmountFcfa Int            // 2 mois de caution
+  advanceAmountFcfa Int            // 2 mois d'avance
+  agencyFeeFcfa     Int            // Honoraires
+  keyMoneyFcfa      Int            @default(0) // Pas de porte
+  totalMoveInFcfa   Int            // Total des frais d'entrée calculé
+  
+  status            LeaseStatus    @default(DRAFT)
+  contractPdfUrl    String?
+  inventoryPdfUrl   String?        // État des lieux d'entrée
+  signedAt          DateTime?
+
+  property          Property       @relation(fields: [propertyId], references: [id])
+  tenant            User           @relation("TenantLeases", fields: [tenantId], references: [id])
+  owner             User           @relation("OwnerLeases", fields: [ownerId], references: [id])
+  transactions      Transaction[]
+
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@index([propertyId])
+  @@index([tenantId])
+  @@index([ownerId])
+  @@index([status])
+}
+
+// Guided Physical or Virtual Visits
+model VisitAppointment {
+  id            String       @id @default(uuid())
+  propertyId    String
+  tenantId      String
+  visitDate     DateTime
+  timeSlot      String       // e.g. "10:00 - 11:00"
+  type          VisitType    @default(IN_PERSON)
+  status        VisitStatus  @default(PENDING)
+  notes         String?
+  whatsappPhone String       // Pour rappels automatiques SMS/WhatsApp
+
+  property      Property     @relation(fields: [propertyId], references: [id])
+  tenant        User         @relation("TenantVisits", fields: [tenantId], references: [id])
+
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([propertyId, visitDate])
+  @@index([tenantId])
+}
+
+// Mobile Money & Electronic Payments Logs
+model Transaction {
+  id                  String             @id @default(uuid())
+  reference           String             @unique // e.g. "TX-VFC-94827103"
+  gatewayReference    String?            // Référence externe Wave, Orange, CinetPay, Paystack
+  userId              String
+  propertyId          String?
+  bookingId           String?
+  leaseId             String?
+  
+  amountFcfa          Int
+  feeFcfa             Int                @default(0)
+  netAmountFcfa       Int
+  currency            String             @default("XOF")
+  paymentMethod       PaymentMethod
+  purpose             TransactionPurpose
+  status              TransactionStatus  @default(PENDING)
+  
+  payerPhone          String
+  payerName           String
+  metadata            String?            // Stockage JSON webhook payloads
+  
+  user                User               @relation(fields: [userId], references: [id])
+  property            Property?          @relation(fields: [propertyId], references: [id])
+  booking             Booking?           @relation(fields: [bookingId], references: [id])
+  lease               LeaseAgreement?    @relation(fields: [leaseId], references: [id])
+  errorLogs           PaymentErrorLog[]
+
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  @@index([reference])
+  @@index([userId])
+  @@index([status])
+  @@index([paymentMethod])
+}
+
+// Journal des échecs de paiement (Mobile Money / Cartes) exploité par le tableau de bord admin.
+// Alimenté automatiquement par le trigger PostgreSQL « trigger_alerte_fonds ».
+model PaymentErrorLog {
+  id            String   @id @default(uuid())
+  transactionId String?
+  propertyId    String?
+  payerPhone    String?
+  detail        String // Message d'erreur détaillé restitué à l'administrateur
+  isResolved    Boolean  @default(false)
+  occurredAt    DateTime @default(now())
+
+  transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  property      Property?    @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+
+  @@index([transactionId])
+  @@index([propertyId])
+  @@index([isResolved, occurredAt])
+}
+
+// User Saved Favorites
+model SavedFavorite {
+  id         String   @id @default(uuid())
+  userId     String
+  propertyId String
+  createdAt  DateTime @default(now())
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, propertyId])
+  @@index([userId])
+  @@index([propertyId])
+}
+
+// Tenant Reviews & Ratings for verified rentals
+model Review {
+  id         String   @id @default(uuid())
+  propertyId String
+  userId     String
+  rating     Int      // 1 à 5 étoiles
+  comment    String
+  isVerified Boolean  @default(true) // Séjour certifié
+  createdAt  DateTime @default(now())
+
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId])
+  @@index([userId])
+}
+
+// Enterprise Audit Logs for Super Admin Command Center
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  action    String   // e.g. "LOGIN", "PROPERTY_PUBLISH", "LEASE_SIGNED", "PAYMENT_RECEIVED"
+  entity    String   // e.g. "USER", "PROPERTY", "TRANSACTION", "LEASE"
+  entityId  String?
+  ipAddress String?
+  details   String?  // JSON string
+  createdAt DateTime @default(now())
+
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([action])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// System Settings & Feature Flags
+model SystemSetting {
+  id          String   @id @default(uuid())
+  key         String   @unique // e.g. "DEFAULT_CURRENCY", "LEGAL_ADVANCE_MONTHS", "WAVE_WEBHOOK_URL"
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+}
+
+// Certified Rent Receipts (Quittances de loyer) issued by landlords / agencies
+model Quittance {
+  id                    String        @id @default(uuid())
+  quittanceNumber       String        @unique // e.g. "QUIT-2026-11-0089"
+  month                 String
+  year                  Int
+  tenantName            String
+  tenantPhone           String
+  ownerName             String
+  propertyTitle         String
+  propertyAddress       String
+  commune               String
+  rentAmountFcfa        Int
+  chargesFcfa           Int           @default(0)
+  totalPaidFcfa         Int
+  paymentDate           DateTime
+  paymentMethod         PaymentMethod
+  transactionReference  String
+  qrCodeVerificationUrl String
+  createdAt             DateTime      @default(now())
+
+  @@index([quittanceNumber])
+  @@index([createdAt])
+}

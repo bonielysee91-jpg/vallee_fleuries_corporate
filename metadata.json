@@ -1,0 +1,8 @@
+{
+  "name": "Vallées Fleuries Corporate",
+  "description": "Elite tech-forward Ivorian real estate SaaS platform for property sales, long-term rentals, furnished short-stays, and verified land acquisitions.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
