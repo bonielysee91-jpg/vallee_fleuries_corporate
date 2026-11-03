@@ -54,15 +54,6 @@ enum FurnishingStatus {
   FULLY_FURNISHED // Entièrement meublé & équipé haut standing
 }
 
-// Sécurité foncière & locative — pièce justificative fournie par le bailleur (contexte RCI)
-enum LandTitleType {
-  TITRE_FONCIER      // Titre Foncier (TF) — sécurisation maximale
-  ACD                // Arrêté de Concession Définitive
-  CERTIFICAT_FONCIER // Certificat Foncier (domaine coutumier)
-  CONTRAT_BAIL       // Contrat de bail notarié
-  NON_COMMUNIQUE     // Bailleur n'a pas encore transmis la pièce
-}
-
 enum BookingStatus {
   PENDING
   CONFIRMED
@@ -107,8 +98,6 @@ enum TransactionStatus {
   SUCCESSFUL
   FAILED
   REFUNDED
-  INSUFFICIENT_FUNDS // Compte / portefeuille Mobile Money sans provisions
-  TECHNICAL_ERROR    // Erreur technique passerelle (timeout, indisponibilité opérateur)
 }
 
 enum TransactionPurpose {
@@ -232,10 +221,6 @@ model Property {
   // 360 / Virtual tour url
   virtualTourUrl  String?
 
-  // Sécurité foncière & locative (élément capital en Côte d'Ivoire)
-  landTitleType     LandTitleType @default(NON_COMMUNIQUE) // Pièce justificative fournie par le bailleur
-  agencyFileFeeFcfa Int           @default(0) // Frais de dossier / de visite facturés par l'agence (FCFA)
-
   // Relations
   ownerId         String
   owner           User              @relation("OwnerProperties", fields: [ownerId], references: [id])
@@ -250,7 +235,6 @@ model Property {
   favorites       SavedFavorite[]
   reviews         Review[]
   transactions    Transaction[]
-  paymentErrorLogs PaymentErrorLog[]
 
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
@@ -450,7 +434,6 @@ model Transaction {
   property            Property?          @relation(fields: [propertyId], references: [id])
   booking             Booking?           @relation(fields: [bookingId], references: [id])
   lease               LeaseAgreement?    @relation(fields: [leaseId], references: [id])
-  errorLogs           PaymentErrorLog[]
 
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
@@ -459,25 +442,6 @@ model Transaction {
   @@index([userId])
   @@index([status])
   @@index([paymentMethod])
-}
-
-// Journal des échecs de paiement (Mobile Money / Cartes) exploité par le tableau de bord admin.
-// Alimenté automatiquement par le trigger PostgreSQL « trigger_alerte_fonds ».
-model PaymentErrorLog {
-  id            String   @id @default(uuid())
-  transactionId String?
-  propertyId    String?
-  payerPhone    String?
-  detail        String // Message d'erreur détaillé restitué à l'administrateur
-  isResolved    Boolean  @default(false)
-  occurredAt    DateTime @default(now())
-
-  transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
-  property      Property?    @relation(fields: [propertyId], references: [id], onDelete: SetNull)
-
-  @@index([transactionId])
-  @@index([propertyId])
-  @@index([isResolved, occurredAt])
 }
 
 // User Saved Favorites

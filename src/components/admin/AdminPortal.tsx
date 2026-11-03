@@ -33,7 +33,7 @@ export const AdminPortal: React.FC = () => {
     const randomAmount = Math.floor(250000 + Math.random() * 2000000);
     try {
       const newTx = await api.initiatePayment({
-        phoneNumber: '+225 0173839518',
+        phoneNumber: '+225 07 99 88 77 66',
         provider,
         amountFcfa: randomAmount,
         purpose: `SIMULATION WEBHOOK CALLBACK ${provider} CI`,

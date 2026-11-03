@@ -68,7 +68,7 @@ export const LandlordDashboard: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-6 rounded-3xl liquid-glass border border-white/60 shadow-lg">
         <div>
           <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-800 block">
-            Gestion Immobilière Agréée
+            Espace Bailleur & Gestion Immobilière Agréée
           </span>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-emerald-950 font-serif">
             Portefeuille Patrimonial VFC
@@ -144,7 +144,7 @@ export const LandlordDashboard: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="p-5 rounded-2xl liquid-glass-card border border-white/60">
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
-                Loyers a vente
+                Loyers Mensuels Sécurisés
               </span>
               <div className="text-2xl font-black font-mono text-emerald-950 mt-1 tabular-nums">
                 24 850 000 FCFA
@@ -394,8 +394,8 @@ export const LandlordDashboard: React.FC = () => {
                       onChange={(e) => setFormData({ ...formData, category: e.target.value as any })}
                       className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white"
                     >
-                      <option value="LONG_TERM_RENT">Vente</option>
-                      <option value="SHORT_TERM_FURNISHED">Location</option>
+                      <option value="LONG_TERM_RENT">Location Longue Durée</option>
+                      <option value="SHORT_TERM_FURNISHED">Résidence Meublée (Courte durée)</option>
                     </select>
                   </div>
 
@@ -581,7 +581,7 @@ export const LandlordDashboard: React.FC = () => {
                     >
                       <option value="UNFURNISHED">Non meublé (location longue durée)</option>
                       <option value="SEMI_FURNISHED">Semi-meublé</option>
-                      <option value="FULLY_FURNISHED">Entièrement meublé</option>
+                      <option value="FULLY_FURNISHED">Entièrement meublé (courte durée)</option>
                     </select>
                   </div>
 
