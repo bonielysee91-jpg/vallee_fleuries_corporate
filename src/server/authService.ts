@@ -8,6 +8,7 @@
 
 import crypto from 'node:crypto';
 import nodemailer from 'nodemailer';
+import type { Transporter } from 'nodemailer';
 import { prisma } from './prisma.ts';
 import type { Prisma, User as PrismaUser, AdminInvitation } from '@prisma/client';
 import { User, UserRole } from '../types/index.ts';
@@ -454,9 +455,9 @@ export function isMailConfigured(): boolean {
   return Boolean(SMTP_HOST && SMTP_USER && SMTP_PASSWORD);
 }
 
-let mailTransport: nodemailer.Transporter | null = null;
+let mailTransport: Transporter | null = null;
 
-function getMailTransport(): nodemailer.Transporter {
+function getMailTransport(): Transporter {
   if (!mailTransport) {
     mailTransport = nodemailer.createTransport({
       host: SMTP_HOST,

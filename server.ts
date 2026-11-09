@@ -1,8 +1,10 @@
 import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import crypto from 'crypto';
+import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { WebSocketServer, WebSocket } from 'ws';
 import { db } from './src/server/db.ts';
 import { neonClient } from './src/server/neon.ts';
 import { prisma } from './src/server/prisma.ts';
@@ -16,6 +18,7 @@ import {
   sanitizeIvorianPhone,
   signJwtToken,
   signRefreshToken,
+  verifyJwtToken,
   verifyRefreshToken,
 } from './src/server/auth.ts';
 import {
@@ -910,6 +913,128 @@ app.get('/api/calculator/move-in', (req, res) => {
 });
 
 // -------------------------------------------------------------
+// 5bis. NOTIFICATIONS TEMPS RÉEL (cloche du Command Center)
+// -------------------------------------------------------------
+// Les administrateurs connectés au back-office ouvrent un canal WebSocket :
+// toute nouvelle demande de visite y est poussée instantanément, en complément
+// d'un e-mail à la Direction. Aucun doublon de transporteur e-mail : on réutilise
+// `sendMail` (voir `src/server/authService.ts`).
+const adminSockets = new Set<WebSocket>();
+
+/** Diffuse un événement à tous les postes d'administration connectés. */
+function broadcastToAdmins(type: string, payload: unknown): void {
+  const message = JSON.stringify({ type, payload });
+  for (const socket of adminSockets) {
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(message);
+    }
+  }
+}
+
+/** Forme d'une alerte de visite poussée à la cloche du Command Center. */
+interface VisitNotificationPayload {
+  id: string;
+  propertyTitle: string;
+  commune: string;
+  clientName: string;
+  clientPhone: string;
+  scheduledDate: string | null;
+  scheduledTime: string | null;
+  message: string;
+  receivedAt: string;
+}
+
+/**
+ * Alerte la Direction sur une nouvelle demande de visite : cloche temps réel pour
+ * les admins connectés, puis e-mail (best-effort — jamais bloquant pour le client).
+ */
+async function notifyAdminsOfNewVisit(visit: any): Promise<void> {
+  const payload: VisitNotificationPayload = {
+    id: visit.id,
+    propertyTitle: visit.propertyTitle ?? 'Bien Vallées Fleuries',
+    commune: visit.commune ?? '',
+    clientName: visit.clientName ?? visit.userName ?? 'Client',
+    clientPhone: visit.clientPhone ?? '',
+    scheduledDate: visit.scheduledDate ?? null,
+    scheduledTime: visit.scheduledTime ?? null,
+    message: '🚨 Nouvelle demande de visite !',
+    receivedAt: new Date().toISOString(),
+  };
+
+  broadcastToAdmins('visit:new', payload);
+
+  if (!isMailConfigured()) return;
+
+  try {
+    const configured = (process.env.ADMIN_EMAIL || '').trim();
+    const dbAdmins = await prisma.user.findMany({
+      where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] } },
+      select: { email: true },
+    });
+    const recipients = Array.from(
+      new Set([configured, ...dbAdmins.map((admin) => admin.email)].filter(Boolean))
+    );
+    if (recipients.length === 0) return;
+
+    const slot = [payload.scheduledDate, payload.scheduledTime].filter(Boolean).join(' à ');
+
+    await sendMail({
+      to: recipients.join(', '),
+      subject: '🚨 Nouvelle demande de visite sur le site',
+      text:
+        `Une nouvelle demande de visite vient d'être enregistrée.\n\n` +
+        `· Bien : ${payload.propertyTitle}${payload.commune ? ` (${payload.commune})` : ''}\n` +
+        `· Client : ${payload.clientName} — ${payload.clientPhone}\n` +
+        (slot ? `· Créneau souhaité : ${slot}\n` : '') +
+        `\nRendez-vous sur le Command Center pour traiter cette demande.`,
+      html:
+        `<div style="font-family:Arial,sans-serif;padding:20px;border:1px solid #eee">` +
+        `<h2 style="color:#ff6b00;margin:0 0 12px">Nouvelle demande de visite</h2>` +
+        `<p>Un client vient de solliciter une visite.</p>` +
+        `<ul>` +
+        `<li><strong>Bien :</strong> ${payload.propertyTitle}${payload.commune ? ` (${payload.commune})` : ''}</li>` +
+        `<li><strong>Client :</strong> ${payload.clientName} — ${payload.clientPhone}</li>` +
+        (slot ? `<li><strong>Créneau souhaité :</strong> ${slot}</li>` : '') +
+        `</ul>` +
+        `<p>Rendez-vous sur le Command Center pour traiter cette demande.</p>` +
+        `</div>`,
+    });
+  } catch (error: any) {
+    console.error('[Visits] Envoi e-mail aux administrateurs :', error?.message ?? error);
+  }
+}
+
+/**
+ * Crée le canal WebSocket sur le serveur HTTP, en chemin dédié `/ws` (aucune
+ * interférence avec les mises à niveau éventuelles d'autres outils). Seuls les
+ * jetons portant un rôle ADMIN / SUPER_ADMIN sont acceptés : la session est lue
+ * depuis le cookie httpOnly de la requête de poignée de main.
+ */
+function setupRealtimeChannel(server: http.Server): WebSocketServer {
+  const wss = new WebSocketServer({ server, path: '/ws' });
+
+  wss.on('connection', (socket, request) => {
+    const token = parseCookies(request.headers.cookie)[ACCESS_TOKEN_COOKIE];
+    const payload = token ? verifyJwtToken(token) : null;
+    const role = payload?.role;
+
+    if (!payload || (role !== 'ADMIN' && role !== 'SUPER_ADMIN')) {
+      socket.close(1008, 'Authentification administrateur requise');
+      return;
+    }
+
+    adminSockets.add(socket);
+    socket.send(JSON.stringify({ type: 'ready', payload: { role } }));
+
+    const release = () => adminSockets.delete(socket);
+    socket.on('close', release);
+    socket.on('error', release);
+  });
+
+  return wss;
+}
+
+// -------------------------------------------------------------
 // 6. VISITS & WHATSAPP SCHEDULING
 // -------------------------------------------------------------
 // The visit book is landlord/agency data; only clients may create an appointment.
@@ -937,6 +1062,12 @@ app.post('/api/visits', authenticateJWT, async (req, res) => {
       entityId: newVisit.id,
       ipAddress: sessionMeta(req).ipAddress,
     });
+
+    // Alerte la Direction (cloche temps réel + e-mail) sans jamais retarder la réponse client.
+    void notifyAdminsOfNewVisit(newVisit).catch((error: any) =>
+      console.error('[Visits] Notification administrateurs :', error?.message ?? error)
+    );
+
     res.status(201).json({ success: true, data: newVisit });
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.message });
@@ -1890,7 +2021,11 @@ async function startServer() {
     console.error('[Bootstrap Admin] Échec du provisionnement :', error?.message ?? error);
   });
 
-  app.listen(PORT, '0.0.0.0', () => {
+  // Canal temps réel (cloche du Command Center) greffé sur le même serveur HTTP.
+  const server = http.createServer(app);
+  setupRealtimeChannel(server);
+
+  server.listen(PORT, '0.0.0.0', () => {
     console.log(`[VFC Production Engine] running on http://0.0.0.0:${PORT}`);
   });
 }

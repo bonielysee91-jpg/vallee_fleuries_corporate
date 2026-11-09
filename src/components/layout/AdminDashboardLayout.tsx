@@ -1,6 +1,7 @@
 import React from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider.tsx';
+import { AdminNotificationBell } from '../dashboard/AdminNotificationBell.tsx';
 import {
   ShieldCheck,
   Eye,
@@ -46,6 +47,8 @@ export const AdminDashboardLayout: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
+          <AdminNotificationBell />
+
           <button
             onClick={() => {
               toggleAdminPreview();
