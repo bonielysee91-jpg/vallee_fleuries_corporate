@@ -24,6 +24,7 @@ import { NotificationToasts } from './components/layout/NotificationToasts.tsx';
 
 import { HomePage } from './pages/HomePage.tsx';
 import { AuthPage } from './pages/AuthPage.tsx';
+import { InvitationAcceptPage } from './pages/InvitationAcceptPage.tsx';
 import { FavoritesPage } from './pages/FavoritesPage.tsx';
 import { MyRentalsPage } from './pages/MyRentalsPage.tsx';
 import { ProfileSettingsPage } from './pages/ProfileSettingsPage.tsx';
@@ -36,6 +37,7 @@ import { ReceiptsPage } from './pages/dashboard/ReceiptsPage.tsx';
 
 import { AdminOverviewPage } from './pages/admin/AdminOverviewPage.tsx';
 import { AdminUsersPage } from './pages/admin/AdminUsersPage.tsx';
+import { AdminInvitationsPage } from './pages/admin/AdminInvitationsPage.tsx';
 import { AdminModerationPage } from './pages/admin/AdminModerationPage.tsx';
 import { AdminTransactionsPage } from './pages/admin/AdminTransactionsPage.tsx';
 import { AdminAuditLogsPage } from './pages/admin/AdminAuditLogsPage.tsx';
@@ -84,6 +86,9 @@ export default function App() {
           {/* ---------- UNIFIED AUTHENTICATION PORTAL ---------- */}
           <Route path="/login" element={<AuthPage mode="login" />} />
           <Route path="/register" element={<AuthPage mode="register" />} />
+
+          {/* Invitation administrateur — page publique d'activation (lien reçu par e-mail). */}
+          <Route path="/invitation" element={<InvitationAcceptPage />} />
 
           {/* ---------- PUBLIC SHELL ---------- */}
           <Route element={<PublicLayout />}>
@@ -161,6 +166,7 @@ export default function App() {
           >
             <Route index element={<AdminOverviewPage />} />
             <Route path="users" element={<AdminUsersPage />} />
+            <Route path="invitations" element={<AdminInvitationsPage />} />
             <Route path="moderation" element={<AdminModerationPage />} />
             <Route path="transactions" element={<AdminTransactionsPage />} />
             <Route path="audit-logs" element={<AdminAuditLogsPage />} />

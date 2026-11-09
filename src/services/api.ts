@@ -142,6 +142,23 @@ export interface AdminStats {
   commissionRevenueFcfa: number;
 }
 
+export type InvitationStatus = 'PENDING' | 'ACCEPTED' | 'REVOKED' | 'EXPIRED';
+
+/** Invitation administrateur émise depuis le Command Center. */
+export interface AdminInvitation {
+  id: string;
+  email: string;
+  phoneNumber: string | null;
+  fullName: string | null;
+  role: UserRole;
+  code: string;
+  status: InvitationStatus;
+  invitedBy: { fullName: string; email: string } | null;
+  acceptedAt: string | null;
+  expiresAt: string;
+  createdAt: string;
+}
+
 export interface SchemaField {
   name: string;
   type: string;
@@ -564,6 +581,50 @@ export const api = {
   async adminGetStats(): Promise<AdminStats> {
     const json = await request<{ data: AdminStats }>('/admin/stats');
     return json.data;
+  },
+
+  // -----------------------------------------------------------
+  // INVITATIONS ADMINISTRATEUR (Command Center)
+  // -----------------------------------------------------------
+  async adminGetInvitations(): Promise<AdminInvitation[]> {
+    const json = await request<{ data: AdminInvitation[] }>('/admin/invitations');
+    return json.data;
+  },
+
+  async adminCreateInvitation(payload: {
+    email: string;
+    phoneNumber?: string;
+    fullName?: string;
+    role?: UserRole;
+  }): Promise<{ invitation: AdminInvitation; mailSent: boolean; message: string }> {
+    const json = await request<{ data: AdminInvitation; mailSent: boolean; message: string }>(
+      '/admin/invitations',
+      { method: 'POST', body: payload }
+    );
+    return { invitation: json.data, mailSent: json.mailSent, message: json.message };
+  },
+
+  async adminRevokeInvitation(id: string): Promise<AdminInvitation> {
+    const json = await request<{ data: AdminInvitation }>(
+      `/admin/invitations/${encodeURIComponent(id)}/revoke`,
+      { method: 'POST' }
+    );
+    return json.data;
+  },
+
+  /** Endpoint public : l'invité active son compte avec le code reçu. */
+  async acceptInvitation(payload: {
+    code: string;
+    fullName?: string;
+    password?: string;
+    phoneNumber?: string;
+  }): Promise<AuthResult> {
+    const json = await request<AuthResult & { success: boolean }>('/invitations/accept', {
+      method: 'POST',
+      body: payload
+    });
+    setAccessToken(json.token);
+    return { user: json.user, token: json.token };
   },
 
   // -----------------------------------------------------------

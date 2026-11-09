@@ -142,6 +142,7 @@ model User {
   sessions        Session[]
   otpVerifications OTPVerification[]
   auditLogs       AuditLog[]
+  sentInvitations AdminInvitation[] @relation("SentInvitations")
 
   @@index([role])
   @@index([phoneNumber])
@@ -527,4 +528,31 @@ model Quittance {
 
   @@index([quittanceNumber])
   @@index([createdAt])
+}
+
+// Administrateur invité à rejoindre le Command Center.
+enum InvitationStatus {
+  PENDING    // Invitation émise, en attente d'acceptation
+  ACCEPTED   // Code utilisé, compte créé / promu
+  REVOKED    // Révéquée manuellement par un administrateur
+  EXPIRED    // Caducité temporelle dépassée
+}
+
+model AdminInvitation {
+  id          String           @id @default(uuid())
+  email       String
+  phoneNumber String?
+  fullName    String?
+  role        UserRole         @default(ADMIN)
+  code        String           @unique // Code d'invitation remis à l'invité
+  status      InvitationStatus @default(PENDING)
+  invitedById String?
+  invitedBy   User?            @relation("SentInvitations", fields: [invitedById], references: [id], onDelete: SetNull)
+  acceptedAt  DateTime?
+  expiresAt   DateTime
+  createdAt   DateTime         @default(now())
+
+  @@index([email])
+  @@index([code])
+  @@index([status])
 }

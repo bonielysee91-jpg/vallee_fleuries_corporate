@@ -25,22 +25,30 @@ import {
   requireRole,
 } from './src/server/authGuard.ts';
 import {
+  acceptAdminInvitation,
   consumeOtp,
+  createAdminInvitation,
   createSession,
   createUser,
   ensureBootstrapAdmin,
   findActiveSession,
+  findInvitationByCode,
   findUserById,
   findUserByIdentifier,
+  isMailConfigured,
   isSmsConfigured,
   issueOtp,
+  listAdminInvitations,
+  markInvitationAccepted,
+  revokeAdminInvitation,
   revokeSession,
+  sendMail,
   sendSms,
   toDomainUser,
   writeAuditLog,
 } from './src/server/authService.ts';
 import { Prisma } from '@prisma/client';
-import type { User as PrismaUser } from '@prisma/client';
+import type { User as PrismaUser, AdminInvitation } from '@prisma/client';
 import { UserRole } from './src/types/index.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1543,6 +1551,203 @@ app.patch('/api/admin/users/:id/ban', authenticateJWT, requireRole(['ADMIN']), a
     res.json({ success: true, data: toDomainUser(updated) });
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// -------------------------------------------------------------
+// 12bis. INVITATIONS ADMINISTRATEUR (Command Center)
+// -------------------------------------------------------------
+
+/** Sérialise une invitation pour l'API (dates ISO ; le code est visible des admins). */
+function serializeInvitation(
+  invitation: AdminInvitation & { invitedBy?: { fullName: string; email: string } | null }
+) {
+  return {
+    id: invitation.id,
+    email: invitation.email,
+    phoneNumber: invitation.phoneNumber,
+    fullName: invitation.fullName,
+    role: invitation.role as UserRole,
+    code: invitation.code,
+    status: invitation.status,
+    invitedBy: invitation.invitedBy ?? null,
+    acceptedAt: invitation.acceptedAt ? invitation.acceptedAt.toISOString() : null,
+    expiresAt: invitation.expiresAt.toISOString(),
+    createdAt: invitation.createdAt.toISOString(),
+  };
+}
+
+/** Émet une invitation administrateur et notifie l'invité par e-mail si le SMTP est configuré. */
+app.post('/api/admin/invitations', authenticateJWT, requireRole(['ADMIN']), async (req, res) => {
+  try {
+    const actor = (req as AuthedRequest).user!;
+    const { email, phoneNumber, fullName, role } = req.body as {
+      email?: string;
+      phoneNumber?: string;
+      fullName?: string;
+      role?: UserRole;
+    };
+
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ success: false, error: 'Adresse e-mail valide requise' });
+    }
+
+    const allowedRoles: UserRole[] = ['TENANT', 'OWNER', 'AGENT', 'ADMIN', 'SUPER_ADMIN'];
+    const invitedRole: UserRole = role && allowedRoles.includes(role) ? role : 'ADMIN';
+
+    // Seule la Direction Générale peut nommer un autre SUPER_ADMIN.
+    if (invitedRole === 'SUPER_ADMIN' && actor.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({
+        success: false,
+        error: 'Seule la Direction Générale peut inviter un Super-Administrateur',
+      });
+    }
+
+    const invitation = await createAdminInvitation({
+      email,
+      phoneNumber,
+      fullName,
+      role: invitedRole,
+      invitedById: actor.userId,
+    });
+
+    let mailSent = false;
+    if (isMailConfigured()) {
+      try {
+        const activationUrl = APP_URL
+          ? `${APP_URL.replace(/\/$/, '')}/invitation?code=${encodeURIComponent(invitation.code)}`
+          : null;
+        const instruction = activationUrl
+          ? `Activez votre accès en un clic : ${activationUrl}`
+          : 'Rendez-vous sur la plateforme pour activer votre accès.';
+        await sendMail({
+          to: invitation.email,
+          subject: 'Votre invitation au Command Center Vallées Fleuries',
+          text:
+            `Bonjour ${invitation.fullName ?? ''},\n\n` +
+            `Vous êtes invité(e) à rejoindre le Command Center de Vallées Fleuries Corporate ` +
+            `avec le rôle ${invitation.role}.\n\n` +
+            `Votre code d'invitation : ${invitation.code}\n\n` +
+            `${instruction}\n` +
+            `Ce code expire le ${invitation.expiresAt.toLocaleString('fr-FR')}.\n\n` +
+            `L'équipe Vallées Fleuries Corporate`,
+          html:
+            `<p>Bonjour ${invitation.fullName ?? ''},</p>` +
+            `<p>Vous êtes invité(e) à rejoindre le <strong>Command Center</strong> de ` +
+            `Vallées Fleuries Corporate avec le rôle <strong>${invitation.role}</strong>.</p>` +
+            `<p>Votre code d'invitation : <strong>${invitation.code}</strong></p>` +
+            (activationUrl
+              ? `<p><a href="${activationUrl}">Activer votre accès en un clic</a></p>`
+              : '<p>Rendez-vous sur la plateforme pour activer votre accès.</p>') +
+            `<p>Ce code expire le ${invitation.expiresAt.toLocaleString('fr-FR')}.</p>`,
+        });
+        mailSent = true;
+      } catch (error: any) {
+        console.error('[Invitation] Envoi e-mail :', error.message);
+      }
+    }
+
+    await writeAuditLog({
+      userId: actor.userId,
+      action: 'INVITATION_SENT',
+      entity: 'ADMIN_INVITATION',
+      entityId: invitation.id,
+      ipAddress: sessionMeta(req).ipAddress,
+      details: { email: invitation.email, role: invitation.role, mailSent },
+    });
+
+    res.status(201).json({
+      success: true,
+      message: mailSent
+        ? 'Invitation envoyée par e-mail'
+        : "Invitation créée. Transmettez le code d'invitation à l'intéressé(e).",
+      mailSent,
+      data: serializeInvitation(invitation),
+    });
+  } catch (error: any) {
+    console.error('[Invitation] Création :', error);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+/** Historique des invitations (toutes statuts confondus). */
+app.get('/api/admin/invitations', authenticateJWT, requireRole(['ADMIN']), async (req, res) => {
+  try {
+    const invitations = await listAdminInvitations();
+    res.json({ success: true, data: invitations.map(serializeInvitation) });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/** Révocation : le code devient immédiatement inutilisable. */
+app.post('/api/admin/invitations/:id/revoke', authenticateJWT, requireRole(['ADMIN']), async (req, res) => {
+  try {
+    const actor = (req as AuthedRequest).user!;
+    const updated = await revokeAdminInvitation(req.params.id);
+    if (!updated) {
+      return res.status(404).json({ success: false, error: 'Invitation introuvable' });
+    }
+
+    await writeAuditLog({
+      userId: actor.userId,
+      action: 'INVITATION_REVOKED',
+      entity: 'ADMIN_INVITATION',
+      entityId: updated.id,
+      ipAddress: sessionMeta(req).ipAddress,
+      details: { email: updated.email },
+    });
+
+    res.json({ success: true, data: serializeInvitation(updated) });
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+/** Acceptation : endpoint public — l'invité active son compte avec le code reçu. */
+app.post('/api/invitations/accept', async (req, res) => {
+  try {
+    const { code, fullName, password, phoneNumber } = req.body as {
+      code?: string;
+      fullName?: string;
+      password?: string;
+      phoneNumber?: string;
+    };
+
+    if (!code) {
+      return res.status(400).json({ success: false, error: "Code d'invitation requis" });
+    }
+
+    const result = await acceptAdminInvitation({ code, fullName, password, phoneNumber });
+    if (!result.ok) {
+      await writeAuditLog({
+        action: 'INVITATION_ACCEPT_FAILED',
+        entity: 'ADMIN_INVITATION',
+        ipAddress: sessionMeta(req).ipAddress,
+        details: { reason: result.error },
+      });
+      return res.status(result.status).json({ success: false, error: result.error });
+    }
+
+    const { accessToken } = await issueTokenPair(req, res, result.user);
+    await writeAuditLog({
+      userId: result.user.id,
+      action: 'INVITATION_ACCEPTED',
+      entity: 'ADMIN_INVITATION',
+      entityId: result.invitation.id,
+      ipAddress: sessionMeta(req).ipAddress,
+      details: { email: result.user.email, role: result.user.role },
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Invitation acceptée : bienvenue au Command Center',
+      user: toDomainUser(result.user),
+      token: accessToken,
+    });
+  } catch (error: any) {
+    console.error('[Invitation] Acceptation :', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

@@ -7,8 +7,9 @@
  */
 
 import crypto from 'node:crypto';
+import nodemailer from 'nodemailer';
 import { prisma } from './prisma.ts';
-import type { Prisma, User as PrismaUser } from '@prisma/client';
+import type { Prisma, User as PrismaUser, AdminInvitation } from '@prisma/client';
 import { User, UserRole } from '../types/index.ts';
 import { comparePassword, hashPassword, sanitizeIvorianPhone } from './auth.ts';
 
@@ -430,4 +431,212 @@ export async function writeAuditLog(entry: AuditEntry): Promise<void> {
     // Never let a logging failure break an authentication flow.
     console.error('[AuditLog] Failed to persist entry:', error);
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* E-mail (SMTP via nodemailer)                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Un unique serveur SMTP suffit pour toutes les notifications transactionnelles
+ * (invitations administrateur, reçus, alertes). Tant que `SMTP_HOST`, `SMTP_USER`
+ * et `SMTP_PASSWORD` ne sont pas renseignés, aucun e-mail n'est émis : le code
+ * d'invitation est alors renvoyé à l'administrateur qui le transmet lui-même.
+ */
+const SMTP_HOST = process.env.SMTP_HOST || '';
+const SMTP_PORT = Number(process.env.SMTP_PORT) || 587;
+const SMTP_USER = process.env.SMTP_USER || '';
+const SMTP_PASSWORD = process.env.SMTP_PASSWORD || '';
+const SMTP_SECURE = process.env.SMTP_SECURE === 'true';
+const MAIL_FROM = process.env.MAIL_FROM || 'Vallées Fleuries Corporate <no-reply@valleesfleuries.ci>';
+
+export function isMailConfigured(): boolean {
+  return Boolean(SMTP_HOST && SMTP_USER && SMTP_PASSWORD);
+}
+
+let mailTransport: nodemailer.Transporter | null = null;
+
+function getMailTransport(): nodemailer.Transporter {
+  if (!mailTransport) {
+    mailTransport = nodemailer.createTransport({
+      host: SMTP_HOST,
+      port: SMTP_PORT,
+      secure: SMTP_SECURE,
+      auth: { user: SMTP_USER, pass: SMTP_PASSWORD },
+    });
+  }
+  return mailTransport;
+}
+
+export interface MailMessage {
+  to: string;
+  subject: string;
+  text: string;
+  html?: string;
+}
+
+export async function sendMail(message: MailMessage): Promise<void> {
+  if (!isMailConfigured()) {
+    throw new Error('Aucun serveur SMTP configuré (SMTP_HOST / SMTP_USER / SMTP_PASSWORD)');
+  }
+  await getMailTransport().sendMail({
+    from: MAIL_FROM,
+    to: message.to,
+    subject: message.subject,
+    text: message.text,
+    ...(message.html ? { html: message.html } : {}),
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Invitations administrateur (Command Center)                         */
+/* ------------------------------------------------------------------ */
+
+/** Une invitation reste valable une semaine par défaut. */
+const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Format lisible et non devinable : `VFC-XXXXXXXXXXXX`. */
+function generateInvitationCode(): string {
+  return `VFC-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
+}
+
+export interface CreateInvitationInput {
+  email: string;
+  phoneNumber?: string;
+  fullName?: string;
+  role?: UserRole;
+  invitedById?: string | null;
+}
+
+/**
+ * Émet une invitation. Les invitations encore `PENDING` pour le même e-mail sont
+ * d'abord marquées `EXPIRED` : un seul code valide ne circule à la fois par adresse.
+ */
+export async function createAdminInvitation(input: CreateInvitationInput) {
+  const email = input.email.trim().toLowerCase();
+  const phoneNumber = input.phoneNumber ? sanitizeIvorianPhone(input.phoneNumber) : null;
+
+  await prisma.adminInvitation.updateMany({
+    where: { email, status: 'PENDING' },
+    data: { status: 'EXPIRED' },
+  });
+
+  return prisma.adminInvitation.create({
+    data: {
+      email,
+      phoneNumber,
+      fullName: input.fullName?.trim() || null,
+      role: input.role ?? 'ADMIN',
+      code: generateInvitationCode(),
+      invitedById: input.invitedById ?? null,
+      expiresAt: new Date(Date.now() + INVITATION_TTL_MS),
+    },
+  });
+}
+
+/** Historique complet, de la plus récente à la plus ancienne. */
+export function listAdminInvitations() {
+  return prisma.adminInvitation.findMany({
+    orderBy: { createdAt: 'desc' },
+    include: { invitedBy: { select: { fullName: true, email: true } } },
+  });
+}
+
+export function findInvitationByCode(code: string) {
+  return prisma.adminInvitation.findUnique({ where: { code: code.trim().toUpperCase() } });
+}
+
+/** Révocation manuelle : le code cesse immédiatement d'être accepté. */
+export async function revokeAdminInvitation(id: string) {
+  const invitation = await prisma.adminInvitation.findUnique({ where: { id } });
+  if (!invitation) return null;
+  return prisma.adminInvitation.update({ where: { id }, data: { status: 'REVOKED' } });
+}
+
+export async function markInvitationAccepted(id: string) {
+  return prisma.adminInvitation.update({
+    where: { id },
+    data: { status: 'ACCEPTED', acceptedAt: new Date() },
+  });
+}
+
+export async function expireInvitation(id: string) {
+  return prisma.adminInvitation.update({ where: { id }, data: { status: 'EXPIRED' } });
+}
+
+export interface AcceptInvitationInput {
+  code: string;
+  fullName?: string;
+  password?: string;
+  phoneNumber?: string;
+}
+
+export type AcceptInvitationResult =
+  | { ok: true; user: PrismaUser; invitation: AdminInvitation }
+  | { ok: false; status: number; error: string };
+
+/**
+ * Active l'invitation : crée le compte (ou promeut un compte existant portant le
+ * même e-mail) vers le rôle de l'invitation, puis la consomme. Le mot de passe est
+ * exigé à la création ; un compte existant qui en possède déjà un n'est jamais écrasé.
+ */
+export async function acceptAdminInvitation(
+  input: AcceptInvitationInput
+): Promise<AcceptInvitationResult> {
+  const invitation = input.code ? await findInvitationByCode(input.code) : null;
+  if (!invitation) return { ok: false, status: 404, error: "Code d'invitation introuvable" };
+  if (invitation.status === 'ACCEPTED') {
+    return { ok: false, status: 409, error: 'Cette invitation a déjà été utilisée' };
+  }
+  if (invitation.status === 'REVOKED') {
+    return { ok: false, status: 403, error: 'Cette invitation a été révoquée' };
+  }
+  if (invitation.status === 'EXPIRED' || invitation.expiresAt.getTime() < Date.now()) {
+    if (invitation.status !== 'EXPIRED') await expireInvitation(invitation.id);
+    return { ok: false, status: 410, error: 'Cette invitation a expiré' };
+  }
+  if (input.password && input.password.length < 10) {
+    return { ok: false, status: 400, error: 'Le mot de passe doit contenir au moins 10 caractères' };
+  }
+
+  const existing = await findUserByIdentifier(invitation.email);
+  let user: PrismaUser;
+
+  if (existing) {
+    user = await prisma.user.update({
+      where: { id: existing.id },
+      data: {
+        // L'invitation fait foi sur le rôle, mais ne réinitialise pas un mot de passe existant.
+        role: invitation.role,
+        ...(existing.passwordHash || !input.password
+          ? {}
+          : { passwordHash: hashPassword(input.password) }),
+        ...(existing.isBanned ? { isBanned: false, banReason: null } : {}),
+      },
+    });
+  } else {
+    const rawPhone = input.phoneNumber || invitation.phoneNumber;
+    if (!rawPhone) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'Numéro de téléphone requis pour activer le compte administrateur',
+      };
+    }
+    const phoneNumber = sanitizeIvorianPhone(rawPhone);
+    const owner = await prisma.user.findUnique({ where: { phoneNumber } });
+    if (owner) {
+      return { ok: false, status: 409, error: 'Ce numéro de téléphone est déjà associé à un compte' };
+    }
+    user = await createUser({
+      email: invitation.email,
+      phoneNumber,
+      fullName: input.fullName?.trim() || invitation.fullName || 'Administrateur VFC',
+      password: input.password,
+      role: invitation.role,
+    });
+  }
+
+  const accepted = await markInvitationAccepted(invitation.id);
+  return { ok: true, user, invitation: accepted };
 }

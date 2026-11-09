@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   LayoutDashboard,
   Users,
+  MailPlus,
   FileCheck,
   Receipt,
   ScrollText
@@ -15,6 +16,7 @@ import {
 const ADMIN_NAV = [
   { to: '/admin', label: 'Command Center', icon: LayoutDashboard, end: true },
   { to: '/admin/users', label: 'Comptes & Rôles', icon: Users, end: false },
+  { to: '/admin/invitations', label: 'Invitations', icon: MailPlus, end: false },
   { to: '/admin/moderation', label: 'Modération', icon: FileCheck, end: false },
   { to: '/admin/transactions', label: 'Transactions', icon: Receipt, end: false },
   { to: '/admin/audit-logs', label: "Journal d'audit", icon: ScrollText, end: false }
