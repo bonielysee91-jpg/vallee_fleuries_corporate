@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAppStore } from '../../store/useAppStore.ts';
-import { Building2, ShieldCheck, Phone, Mail, MapPin, ExternalLink } from 'lucide-react';
+import { Building2, ShieldCheck, Phone, Mail, MapPin, ExternalLink, Check } from 'lucide-react';
 import { VFC_WHATSAPP_URL, VFC_WHATSAPP_DISPLAY } from '../../constants/contact.ts';
 
 export const Footer: React.FC = () => {
@@ -22,7 +22,7 @@ export const Footer: React.FC = () => {
               </span>
             </div>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Plateforme SaaS de location immobilière de référence en Côte d'Ivoire. Courtage locatif institutionnel, sécurisation juridique des baux et conciergerie de prestige.
+              Plateforme SaaS de vente et de location immobilière de référence en Côte d'Ivoire. Courtage institutionnel, sécurisation juridique des actes et des baux, et conciergerie de prestige.
             </p>
             <div className="flex items-center gap-2 text-xs text-amber-400/90 font-medium">
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
@@ -43,29 +43,29 @@ export const Footer: React.FC = () => {
             </ul>
           </div>
 
-          {/* Solutions & Juridique */}
+          {/* Types de Biens Autorisés */}
           <div>
             <h4 className="text-sm font-semibold uppercase tracking-wider text-white mb-4">
-              Services & Réglementation
+              Types de Biens Autorisés
             </h4>
             <ul className="space-y-2 text-xs text-slate-400">
-              <li>
-                <button onClick={() => setView('properties')} className="hover:text-amber-400 transition-colors">
-                  Locations Longue Durée (Baux 1 an+)
+              <li className="flex items-start gap-2">
+                <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                <button onClick={() => setView('properties')} className="hover:text-amber-400 transition-colors text-left">
+                  Vente de Maisons & Villas
                 </button>
               </li>
-              <li>
-                <button onClick={() => setView('properties')} className="hover:text-amber-400 transition-colors">
-                  Résidences Meublées Courte Durée
+              <li className="flex items-start gap-2">
+                <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                <button onClick={() => setView('properties')} className="hover:text-amber-400 transition-colors text-left">
+                  Location de Maisons Familiales (Baux 1 an+)
                 </button>
               </li>
-              <li>
+              <li className="pt-1">
                 <button onClick={() => setView('estimator')} className="hover:text-amber-400 transition-colors">
-                  Calculateur Loi N° 2019-576 (Caution 2+2)
+                  Calculateur Frais d'Entrée (Location)
                 </button>
               </li>
-              <li>Vérification des Mandats Bailleurs</li>
-              <li>Génération Sécurisée de Quittances de Loyer</li>
               <li>Paiements Wave, Orange Money & MTN MoMo</li>
             </ul>
           </div>

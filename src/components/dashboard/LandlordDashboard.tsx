@@ -3,13 +3,14 @@ import { useAppStore } from '../../store/useAppStore.ts';
 import { api, formatFcfa } from '../../services/api.ts';
 import { Property, VisitAppointment, RentQuittance } from '../../types/index.ts';
 import { VFC_MEDIA } from '../../constants/media.ts';
+import { PROPERTY_TYPE_OPTIONS, TRANSACTION_TYPE_OPTIONS } from '../../constants/property.ts';
 import { 
   BarChart3, PlusCircle, FileText, CheckCircle2, Clock, Calendar, 
   MapPin, ShieldCheck, ArrowRight, Zap, Droplets, Shield, ExternalLink, Printer
 } from 'lucide-react';
 
 export const LandlordDashboard: React.FC = () => {
-  const { openQuittanceModal, addNotification, setView } = useAppStore();
+  const { openQuittanceModal, addNotification, setView, visitsRefreshToken } = useAppStore();
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'NEW_LISTING' | 'VISITS' | 'QUITTANCES'>('OVERVIEW');
   const [properties, setProperties] = useState<Property[]>([]);
   const [visits, setVisits] = useState<VisitAppointment[]>([]);
@@ -44,9 +45,13 @@ export const LandlordDashboard: React.FC = () => {
 
   useEffect(() => {
     api.getProperties().then(setProperties);
-    api.getVisits().then(setVisits);
     api.getQuittances().then(setQuittances);
   }, []);
+
+  // Recharge le carnet de rendez-vous dès qu'une visite est confirmée (signal global du store).
+  useEffect(() => {
+    api.getVisits().then(setVisits);
+  }, [visitsRefreshToken]);
 
   const handleCreateProperty = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -68,7 +73,7 @@ export const LandlordDashboard: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-6 rounded-3xl liquid-glass border border-white/60 shadow-lg">
         <div>
           <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-800 block">
-            Espace Bailleur & Gestion Immobilière Agréée
+            Espace Propriétaire & Gestion Immobilière Agréée
           </span>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-emerald-950 font-serif">
             Portefeuille Patrimonial VFC
@@ -180,7 +185,7 @@ export const LandlordDashboard: React.FC = () => {
 
             <div className="p-5 rounded-2xl liquid-glass-card border border-white/60">
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
-                Dossiers Bailleurs Conformes
+                Dossiers Propriétaires Conformes
               </span>
               <div className="text-2xl font-black font-mono text-emerald-950 mt-1 tabular-nums">
                 100 %
@@ -217,13 +222,13 @@ export const LandlordDashboard: React.FC = () => {
                         <span>{prop.neighborhood}</span>
                         <span aria-hidden="true">·</span>
                         <span className="text-emerald-800 font-semibold">
-                          {prop.category === 'LONG_TERM_RENT' ? 'Bail long terme' : 'Meublé courte durée'}
+                          {prop.category === 'SALE' ? 'Vente' : 'Location longue durée'}
                         </span>
                       </div>
                       <h4 className="text-sm font-bold text-slate-900 mt-0.5">{prop.title}</h4>
                       <span className="text-xs font-mono font-bold text-emerald-900 mt-0.5 block">
                         {formatFcfa(prop.priceFcfa)}
-                        {prop.category === 'LONG_TERM_RENT' ? ' / mois' : ' / nuitée'}
+                        {prop.category === 'LONG_TERM_RENT' ? ' / mois' : ''}
                       </span>
                     </div>
                   </div>
@@ -265,7 +270,7 @@ export const LandlordDashboard: React.FC = () => {
                     <span aria-hidden="true">·</span>
                     <span className="font-mono text-slate-500">{vis.clientPhone}</span>
                     <span aria-hidden="true">·</span>
-                    <span className="text-emerald-700 font-semibold">{vis.visitType === 'PHYSICAL' ? 'Sur Site' : 'Visio Directe'}</span>
+                    <span className="text-emerald-700 font-semibold">{vis.visitType === 'IN_PERSON' ? 'Sur Site' : 'Visio Directe'}</span>
                   </div>
                   <h4 className="text-sm font-bold text-emerald-950">{vis.propertyTitle}</h4>
                   <div className="text-xs text-slate-500 flex items-center gap-2">
@@ -355,7 +360,7 @@ export const LandlordDashboard: React.FC = () => {
                 {wizardStep === 1 && '1. Localisation & Caractéristiques'}
                 {wizardStep === 2 && '2. Visuels & Visite Virtuelle'}
                 {wizardStep === 3 && '3. Barème Financier & Caution 2+2'}
-                {wizardStep === 4 && '4. Dossier Bailleur & Validation'}
+                {wizardStep === 4 && '4. Dossier Propriétaire & Validation'}
               </span>
             </div>
             <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
@@ -394,8 +399,11 @@ export const LandlordDashboard: React.FC = () => {
                       onChange={(e) => setFormData({ ...formData, category: e.target.value as any })}
                       className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white"
                     >
-                      <option value="LONG_TERM_RENT">Location Longue Durée</option>
-                      <option value="SHORT_TERM_FURNISHED">Résidence Meublée (Courte durée)</option>
+                      {TRANSACTION_TYPE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
                     </select>
                   </div>
 
@@ -406,12 +414,11 @@ export const LandlordDashboard: React.FC = () => {
                       onChange={(e) => setFormData({ ...formData, type: e.target.value as any })}
                       className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white"
                     >
-                      <option value="VILLA">Villa d'Architecte</option>
-                      <option value="DUPLEX">Duplex Haut Standing</option>
-                      <option value="PENTHOUSE">Penthouse & Rooftop</option>
-                      <option value="APARTMENT">Appartement Exécutif</option>
-                      <option value="STUDIO">Studio Meublé</option>
-                      <option value="COMMERCIAL">Local Professionnel</option>
+                      {PROPERTY_TYPE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>
@@ -568,20 +575,20 @@ export const LandlordDashboard: React.FC = () => {
             {wizardStep === 4 && (
               <div className="space-y-4">
                 <h3 className="text-base font-bold text-emerald-950 font-serif">
-                  Dossier Bailleur & Validation
+                  Dossier Propriétaire & Validation
                 </h3>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">Ameublement</label>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Équipement</label>
                     <select
                       value={formData.furnishing}
                       onChange={(e) => setFormData({ ...formData, furnishing: e.target.value as any })}
                       className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white"
                     >
-                      <option value="UNFURNISHED">Non meublé (location longue durée)</option>
-                      <option value="SEMI_FURNISHED">Semi-meublé</option>
-                      <option value="FULLY_FURNISHED">Entièrement meublé (courte durée)</option>
+                      <option value="UNFURNISHED">Non équipé</option>
+                      <option value="SEMI_FURNISHED">Partiellement équipé</option>
+                      <option value="FULLY_FURNISHED">Entièrement équipé</option>
                     </select>
                   </div>
 

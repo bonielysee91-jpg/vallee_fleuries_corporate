@@ -19,19 +19,6 @@ export const PropertyDetail: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
 
-  // Booking / Reservation State (for short-stay or down payment)
-  const [startDate, setStartDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 3);
-    return d.toISOString().split('T')[0];
-  });
-  const [endDate, setEndDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 7);
-    return d.toISOString().split('T')[0];
-  });
-  const [nightsCount, setNightsCount] = useState(4);
-
   useEffect(() => {
     if (selectedPropertyId) {
       setLoading(true);
@@ -41,15 +28,6 @@ export const PropertyDetail: React.FC = () => {
       });
     }
   }, [selectedPropertyId]);
-
-  useEffect(() => {
-    if (startDate && endDate) {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      const diff = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
-      setNightsCount(diff);
-    }
-  }, [startDate, endDate]);
 
   if (loading || !property) {
     return (
@@ -61,28 +39,14 @@ export const PropertyDetail: React.FC = () => {
   }
 
   const isFav = favorites.includes(property.id);
-  const isShortStay = property.category === 'SHORT_TERM_FURNISHED';
-  const totalStayPrice = isShortStay ? (property.priceFcfa * nightsCount + 30000) : property.priceFcfa;
+  const isSale = property.category === 'SALE';
 
   // Referent contact resolved from the agent / landlord persisted in Neon — never a local placeholder.
   const referent = property.agent ?? property.landlord;
   const referentName = referent?.fullName ?? 'Conciergerie Vallées Fleuries';
-  const referentRole = referent?.companyName ?? (property.agent ? 'Conseiller Immobilier VFC' : 'Bailleur Vérifié VFC');
+  const referentRole = referent?.companyName ?? (property.agent ? 'Conseiller Immobilier VFC' : 'Propriétaire Vérifié VFC');
   const referentPhone = referent?.phoneNumber ?? '';
   const referentWhatsAppHref = `https://wa.me/${(referentPhone || `+${VFC_WHATSAPP_NUMBER}`).replace(/\D/g, '')}?text=${encodeURIComponent(VFC_WHATSAPP_MESSAGE)}`;
-
-  const handleBookNow = () => {
-    openPaymentModal({
-      amountFcfa: totalStayPrice,
-      purpose: isShortStay 
-        ? `Réservation ${nightsCount} nuitée(s) : ${property.title}` 
-        : `Acompte réservation bail : ${property.title}`,
-      propertyTitle: property.title,
-      onSuccessCallback: () => {
-        addNotification('Réservation enregistrée et transmise à la régie VFC !', 'success');
-      }
-    });
-  };
 
   const handleShare = () => {
     navigator.clipboard?.writeText(window.location.href);
@@ -150,7 +114,7 @@ export const PropertyDetail: React.FC = () => {
           {/* Verification Watermark */}
           <div className="absolute top-6 right-6 px-3 py-1.5 rounded-xl bg-white/90 backdrop-blur-md border border-white/60 text-emerald-950 text-xs font-bold flex items-center gap-2 shadow-lg">
             <ShieldCheck className="w-4 h-4 text-emerald-700" />
-            <span>Bail Certifié Conforme Côte d'Ivoire</span>
+            <span>{isSale ? "Acte de Vente Certifié Côte d'Ivoire" : "Contrat de Location Certifié Côte d'Ivoire"}</span>
           </div>
         </div>
 
@@ -243,7 +207,7 @@ export const PropertyDetail: React.FC = () => {
               </div>
               <div>
                 <span className="text-[10px] text-slate-400 uppercase font-bold block">Certification</span>
-                <span className="text-sm font-bold text-emerald-900">Bail Conforme CI</span>
+                <span className="text-sm font-bold text-emerald-900">{isSale ? 'Vente Ferme' : 'Location Vérifiée CI'}</span>
               </div>
             </div>
           </div>
@@ -298,7 +262,7 @@ export const PropertyDetail: React.FC = () => {
             </div>
           </div>
 
-          {/* Lease Compliance Panel (Loi N° 2019-576) */}
+          {/* Legal & Title Panel — Vente (Acte / Titre Foncier) ou Location (Bail Loi 2019-576) */}
           <div className="p-6 rounded-2xl liquid-glass-card bg-emerald-950 text-white space-y-4">
             <div className="flex items-center justify-between border-b border-emerald-800/80 pb-3">
               <div className="flex items-center gap-2">
@@ -312,15 +276,31 @@ export const PropertyDetail: React.FC = () => {
               </span>
             </div>
 
-            <p className="text-xs text-slate-300 leading-relaxed">
-              Le contrat de bail et les diagnostics sont rigoureusement audités conformément à la Loi N° 2019-576 du 26 juin 2019 régissant les baux d'habitation en République de Côte d'Ivoire.
-            </p>
+            {isSale ? (
+              <>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Le titre de propriété, l'état des droits réels et les diagnostics techniques sont rigoureusement audités avant toute promesse de vente en République de Côte d'Ivoire.
+                </p>
 
-            <div className="p-3.5 rounded-xl bg-emerald-900/60 border border-emerald-700/50 text-xs font-mono space-y-1 text-emerald-200">
-              <div>Cadre Légal : <strong className="text-white">Bail d'Habitation Conforme Loi 2019-576</strong></div>
-              <div>Plafond Légal : <strong className="text-amber-300">2 Mois Avance + 2 Mois Caution Maximum</strong></div>
-              <div>Juridiction Territoriale : <strong className="text-white">Tribunal de Commerce d'Abidjan</strong></div>
-            </div>
+                <div className="p-3.5 rounded-xl bg-emerald-900/60 border border-emerald-700/50 text-xs font-mono space-y-1 text-emerald-200">
+                  <div>Cadre Juridique : <strong className="text-white">Promesse Synallagmatique de Vente</strong></div>
+                  <div>Dossier Foncier : <strong className="text-amber-300">Titre Foncier / ACD Vérifié</strong></div>
+                  <div>Juridiction Territoriale : <strong className="text-white">Tribunal de Commerce d'Abidjan</strong></div>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Le contrat de bail et les diagnostics sont rigoureusement audités conformément à la Loi N° 2019-576 du 26 juin 2019 régissant les baux d'habitation en République de Côte d'Ivoire.
+                </p>
+
+                <div className="p-3.5 rounded-xl bg-emerald-900/60 border border-emerald-700/50 text-xs font-mono space-y-1 text-emerald-200">
+                  <div>Cadre Légal : <strong className="text-white">Bail d'Habitation Conforme Loi 2019-576</strong></div>
+                  <div>Plafond Légal : <strong className="text-amber-300">2 Mois Avance + 2 Mois Caution Maximum</strong></div>
+                  <div>Juridiction Territoriale : <strong className="text-white">Tribunal de Commerce d'Abidjan</strong></div>
+                </div>
+              </>
+            )}
           </div>
 
         </div>
@@ -334,96 +314,52 @@ export const PropertyDetail: React.FC = () => {
             {/* Price display */}
             <div className="border-b border-slate-100 pb-4">
               <span className="text-[11px] uppercase font-bold text-slate-400 tracking-wider block">
-                {isShortStay ? 'Tarif nuitée meublée' : 'Loyer mensuel conventionné'}
+                {isSale ? 'Prix de vente' : 'Loyer mensuel conventionné'}
               </span>
               <div className="flex items-baseline gap-2 mt-1">
                 <span className="text-2xl sm:text-3xl font-black font-mono text-emerald-950 tabular-nums">
                   {formatFcfa(property.priceFcfa)}
                 </span>
                 <span className="text-xs text-slate-500 font-medium">
-                  {isShortStay ? '/ nuitée' : '/ mois'}
+                  {isSale ? 'FCFA' : '/ mois'}
                 </span>
               </div>
-              {!isShortStay && (
-                <p className="text-[11px] text-emerald-700 font-medium mt-1">
-                  Caution : 2 mois · Avance : 2 mois (Loi 2019-576)
-                </p>
-              )}
+              <p className="text-[11px] text-emerald-700 font-medium mt-1">
+                {isSale
+                  ? "Frais de notaire & droits d'enregistrement en sus"
+                  : 'Caution : 2 mois · Avance : 2 mois (Loi 2019-576)'}
+              </p>
             </div>
 
-            {/* If Short stay: Interactive date range picker */}
-            {isShortStay ? (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Arrivée</label>
-                    <input
-                      type="date"
-                      value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
-                      className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 bg-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Départ</label>
-                    <input
-                      type="date"
-                      value={endDate}
-                      onChange={(e) => setEndDate(e.target.value)}
-                      className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 bg-white"
-                    />
-                  </div>
-                </div>
+            {/* Vente & Location longue durée : visites et réservation uniquement, aucun calcul « par nuit ». */}
+            <div className="space-y-3">
+              <button
+                onClick={openVisitModal}
+                className="w-full py-3 px-4 rounded-xl bg-emerald-900 hover:bg-emerald-800 text-white font-semibold text-xs tracking-wide shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Calendar className="w-4 h-4 text-amber-300" />
+                <span>Programmer une Visite Exclusive</span>
+              </button>
 
-                <div className="p-3 bg-slate-50 rounded-xl text-xs space-y-1.5">
-                  <div className="flex justify-between">
-                    <span className="text-slate-600">{formatFcfa(property.priceFcfa)} × {nightsCount} nuits</span>
-                    <span className="font-mono font-medium">{formatFcfa(property.priceFcfa * nightsCount)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-600">Frais de conciergerie & ménage</span>
-                    <span className="font-mono font-medium">{formatFcfa(30000)}</span>
-                  </div>
-                  <div className="border-t border-slate-200 pt-1.5 flex justify-between font-bold text-emerald-950">
-                    <span>Total Séjour</span>
-                    <span className="font-mono text-sm">{formatFcfa(totalStayPrice)}</span>
-                  </div>
-                </div>
-
-                <button
-                  onClick={handleBookNow}
-                  className="w-full py-3 px-4 rounded-xl bg-emerald-900 hover:bg-emerald-800 text-white font-semibold text-xs tracking-wide shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <CreditCard className="w-4 h-4 text-amber-300" />
-                  <span>Réserver avec Wave ou Orange Money</span>
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {/* Long Term Rental Actions */}
-                <button
-                  onClick={openVisitModal}
-                  className="w-full py-3 px-4 rounded-xl bg-emerald-900 hover:bg-emerald-800 text-white font-semibold text-xs tracking-wide shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <Calendar className="w-4 h-4 text-amber-300" />
-                  <span>Programmer une Visite Exclusive</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    openPaymentModal({
-                      amountFcfa: property.priceFcfa,
-                      purpose: `Acompte de réservation : ${property.title}`,
-                      propertyTitle: property.title
-                    });
-                  }}
-                  className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs tracking-wide shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <CreditCard className="w-4 h-4 text-white" />
-                  <span>Poser une Option de Réservation</span>
-                </button>
-              </div>
-            )}
+              <button
+                onClick={() => {
+                  openPaymentModal({
+                    amountFcfa: property.priceFcfa,
+                    purpose: isSale
+                      ? `Dépôt d'offre d'achat : ${property.title}`
+                      : `Acompte de réservation : ${property.title}`,
+                    propertyTitle: property.title,
+                    // Rattache le paiement au bien : à l'encaissement confirmé, une location
+                    // est automatiquement retirée du marché.
+                    propertyId: property.id
+                  });
+                }}
+                className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs tracking-wide shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <CreditCard className="w-4 h-4 text-white" />
+                <span>{isSale ? "Déposer une Offre d'Achat" : 'Poser une Option de Réservation'}</span>
+              </button>
+            </div>
 
             <div className="pt-2 text-center">
               <span className="text-[11px] text-slate-400">

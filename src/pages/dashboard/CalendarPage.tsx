@@ -13,10 +13,7 @@ import {
 
 const WEEKDAYS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
 
-const isFurnished = (property: Property): boolean =>
-  property.category === 'SHORT_TERM_FURNISHED';
-
-/** `/dashboard/calendar` — gestionnaire de disponibilité des résidences meublées. */
+/** `/dashboard/calendar` — gestionnaire de disponibilité du portefeuille. */
 export const CalendarPage: React.FC = () => {
   const addNotification = useAppStore((state) => state.addNotification);
 
@@ -26,8 +23,6 @@ export const CalendarPage: React.FC = () => {
   const [selectedId, setSelectedId] = useState('');
   const [cursor, setCursor] = useState(() => new Date());
 
-  const furnished = useMemo(() => properties.filter(isFurnished), [properties]);
-
   useEffect(() => {
     let active = true;
     setLoading(true);
@@ -36,8 +31,8 @@ export const CalendarPage: React.FC = () => {
         if (!active) return;
         setProperties(propList);
         setBookings(bookingList);
-        const firstFurnished = propList.find(isFurnished);
-        setSelectedId((prev) => prev || firstFurnished?.id || '');
+        const first = propList[0];
+        setSelectedId((prev) => prev || first?.id || '');
       })
       .catch((err) => {
         addNotification(
@@ -64,8 +59,8 @@ export const CalendarPage: React.FC = () => {
   ];
 
   const selectedProperty = useMemo(
-    () => furnished.find((prop) => prop.id === selectedId) ?? null,
-    [furnished, selectedId]
+    () => properties.find((prop) => prop.id === selectedId) ?? null,
+    [properties, selectedId]
   );
 
   const propertyBookings = useMemo(
@@ -115,7 +110,7 @@ export const CalendarPage: React.FC = () => {
             Calendrier des disponibilités
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Visualisez les réservations et les nuits libres de vos résidences meublées.
+            Visualisez les réservations et les périodes disponibles de vos biens.
           </p>
         </div>
       </header>
@@ -125,15 +120,14 @@ export const CalendarPage: React.FC = () => {
           <Loader2 className="w-5 h-5 animate-spin text-emerald-700" />
           Chargement du calendrier…
         </div>
-      ) : furnished.length === 0 ? (
+      ) : properties.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center">
           <CalendarDays className="w-8 h-8 mx-auto text-slate-300" />
           <h2 className="mt-3 font-serif text-lg font-bold text-emerald-950">
-            Aucune résidence meublée publiée
+            Aucun bien publié
           </h2>
           <p className="mt-1 text-xs text-slate-500">
-            Publiez une résidence meublée (nuitée / semaine) pour gérer son calendrier de
-            disponibilité.
+            Publiez un bien pour gérer son calendrier de disponibilité.
           </p>
         </div>
       ) : (
@@ -141,15 +135,15 @@ export const CalendarPage: React.FC = () => {
           <div className="liquid-glass-card rounded-2xl border border-white/60 shadow-sm p-4 sm:p-5 space-y-4">
             <div>
               <label className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1.5">
-                Résidence meublée
+                Bien immobilier
               </label>
               <select
                 value={selectedId}
                 onChange={(e) => setSelectedId(e.target.value)}
                 className={inputClass}
               >
-                <option value="">Sélectionnez une résidence</option>
-                {furnished.map((prop) => (
+                <option value="">Sélectionnez un bien</option>
+                {properties.map((prop) => (
                   <option key={prop.id} value={prop.id}>
                     {prop.title} — {prop.commune}
                   </option>
@@ -258,7 +252,7 @@ export const CalendarPage: React.FC = () => {
             </h2>
             {upcoming.length === 0 ? (
               <p className="text-xs text-slate-500">
-                Aucune réservation enregistrée pour cette résidence.
+                Aucune réservation enregistrée pour ce bien.
               </p>
             ) : (
               <ul className="space-y-2">
@@ -277,7 +271,7 @@ export const CalendarPage: React.FC = () => {
                       <p className="text-[11px] text-slate-500">
                         {new Date(booking.checkInDate).toLocaleDateString('fr-FR')} →{' '}
                         {new Date(booking.checkOutDate).toLocaleDateString('fr-FR')} ·{' '}
-                        {booking.numberOfNights} nuit(s)
+                        {booking.numberOfNights} mois
                       </p>
                     </div>
                     <span className="text-xs font-bold text-emerald-950 font-mono tabular-nums">

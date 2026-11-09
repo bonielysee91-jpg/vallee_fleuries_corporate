@@ -1,8 +1,30 @@
 import crypto from 'node:crypto';
 import { User, UserRole } from '../types/index.ts';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'vallees-fleuries-corporate-secret-key-2026';
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || JWT_SECRET;
+/**
+ * Résout un secret de signature : en production, une variable d'environnement
+ * manquante stoppe le serveur au démarrage plutôt que de signer les jetons avec
+ * une clé publique écrite dans le code source (jetons falsifiables).
+ */
+function resolveJwtSecret(variableName: string, devFallback: string): string {
+  const value = process.env[variableName]?.trim();
+  if (value) return value;
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      `[Sécurité] ${variableName} est obligatoire en production. ` +
+        "Arrêt du serveur pour empêcher la signature de jetons avec une clé par défaut."
+    );
+  }
+
+  console.warn(
+    `[Sécurité] ${variableName} est absent : utilisation d'une clé de développement non sécurisée (interdit en production).`
+  );
+  return devFallback;
+}
+
+const JWT_SECRET = resolveJwtSecret('JWT_SECRET', 'vallees-fleuries-corporate-dev-secret-key-2026');
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET?.trim() || JWT_SECRET;
 
 // Short-lived access token carried in the Authorization header.
 export const ACCESS_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour

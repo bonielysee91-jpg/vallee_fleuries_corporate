@@ -142,7 +142,7 @@ export const ProfileSettingsPage: React.FC = () => {
             <span className="w-10 h-10 rounded-2xl bg-amber-400 text-emerald-950 flex items-center justify-center">
               <Briefcase className="w-5 h-5" />
             </span>
-            <span className="text-xs font-bold text-slate-800">Studio Bailleur</span>
+            <span className="text-xs font-bold text-slate-800">Espace Propriétaire</span>
           </Link>
         ) : (
           <Link

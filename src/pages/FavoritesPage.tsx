@@ -102,7 +102,7 @@ export const FavoritesPage: React.FC = () => {
                   <Heart className="w-4 h-4 fill-rose-500" />
                 </button>
                 <span className="absolute bottom-3 left-3 px-2.5 py-1 rounded-full bg-emerald-950/85 text-amber-300 text-[10px] font-bold uppercase tracking-wide">
-                  {property.category === 'LONG_TERM_RENT' ? 'Longue durée' : 'Meublé court séjour'}
+                  {property.category === 'SALE' ? 'Vente' : 'Location longue durée'}
                 </span>
               </div>
 
@@ -133,7 +133,7 @@ export const FavoritesPage: React.FC = () => {
                       {formatFcfa(property.priceFcfa, 'FCFA')}
                     </p>
                     <p className="text-[10px] text-slate-500">
-                      {property.category === 'LONG_TERM_RENT' ? 'par mois' : 'par nuit'}
+                      {property.category === 'SALE' ? 'prix total' : 'par mois'}
                     </p>
                   </div>
                   <Link

@@ -1,10 +1,36 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../../store/useAppStore.ts';
 import { api } from '../../services/api.ts';
-import { X, Calendar, Clock, Video, UserCheck, MessageSquare, CheckCircle, ExternalLink } from 'lucide-react';
+import { X, Calendar, Clock, Video, UserCheck, MessageSquare, CheckCircle, ExternalLink, AlertCircle } from 'lucide-react';
 
-export const VisitModal: React.FC = () => {
-  const { isVisitModalOpen, closeVisitModal, selectedPropertyId, addNotification, currentUser } = useAppStore();
+interface VisitModalProps {
+  /** Pilotage « contrôlé » optionnel : si absent, l'ouverture provient du store global. */
+  isOpen?: boolean;
+  /** Fermeture « contrôlée » optionnelle : si absente, on ferme via le store global. */
+  onClose?: () => void;
+  /** Callback optionnel déclenché après l'enregistrement réussi d'un rendez-vous (ex. recharger la liste). */
+  onSuccessRefresh?: () => void;
+  /** Id du bien en mode « contrôlé » ; à défaut, on retombe sur le bien sélectionné du store. */
+  propertyId?: string;
+  /** Surchargent le bien / l'agent résolus depuis le store lorsqu'ils sont fournis. */
+  propertyName?: string;
+  agentName?: string;
+}
+
+export const VisitModal: React.FC<VisitModalProps> = ({
+  isOpen: isOpenProp,
+  onClose,
+  onSuccessRefresh,
+  propertyId,
+  propertyName,
+  agentName,
+}) => {
+  const { isVisitModalOpen, closeVisitModal, requestVisitsRefresh, selectedPropertyId, addNotification, currentUser } = useAppStore();
+  // Ouverture : la prop « contrôlée » est prioritaire, sinon on lit l'état global du store.
+  const isOpen = isOpenProp ?? isVisitModalOpen;
+  const closeModal = onClose ?? closeVisitModal;
+  // Bien ciblé : la prop est prioritaire, sinon le bien sélectionné dans le store.
+  const resolvedPropertyId = propertyId ?? selectedPropertyId;
   const [property, setProperty] = useState<any>(null);
   const [visitType, setVisitType] = useState<'PHYSICAL' | 'VIDEO_CALL'>('PHYSICAL');
   const [date, setDate] = useState(() => {
@@ -19,21 +45,46 @@ export const VisitModal: React.FC = () => {
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [confirmedVisit, setConfirmedVisit] = useState<any>(null);
+  /** Message bloquant affiché si la session a expiré (401) au moment de l'enregistrement. */
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  /** Remet le modal à blanc : écran de succès masqué, erreur effacée et formulaire vierge. */
+  const resetForm = () => {
+    setConfirmedVisit(null);
+    setAuthError(null);
+    setIsSubmitting(false);
+    setVisitType('PHYSICAL');
+    const d = new Date();
+    d.setDate(d.getDate() + 2);
+    setDate(d.toISOString().split('T')[0]);
+    setTime('15:00');
+    setName(currentUser?.fullName ?? '');
+    setPhone(currentUser?.phoneNumber ?? '');
+    setEmail(currentUser?.email ?? '');
+    setNotes('');
+  };
 
   React.useEffect(() => {
-    if (selectedPropertyId && isVisitModalOpen) {
-      api.getPropertyById(selectedPropertyId).then(setProperty);
+    if (resolvedPropertyId && isOpen) {
+      api.getPropertyById(resolvedPropertyId).then(setProperty);
     }
-  }, [selectedPropertyId, isVisitModalOpen]);
+  }, [resolvedPropertyId, isOpen]);
 
-  if (!isVisitModalOpen) return null;
+  // 🛡️ Sécurité : à chaque ouverture OU changement de bien, on repart d'un modal vierge
+  // (aucun écran « Visite Confirmée », aucune erreur de session ni champ résiduel).
+  React.useEffect(() => {
+    resetForm();
+  }, [isOpen, resolvedPropertyId]);
+
+  if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
+    setAuthError(null);
     try {
       const created = await api.scheduleVisit({
-        propertyId: selectedPropertyId || 'prop_vfc_01',
+        propertyId: resolvedPropertyId || 'prop_vfc_01',
         userName: name,
         clientPhone: phone,
         clientEmail: email,
@@ -45,9 +96,33 @@ export const VisitModal: React.FC = () => {
       setConfirmedVisit(created);
       addNotification('Visite confirmée avec succès dans l\'agenda VFC !', 'success');
     } catch (err: any) {
-      addNotification(err.message || 'Erreur lors de la programmation', 'error');
+      // 401 : session expirée (le rafraîchissement automatique du jeton a déjà échoué).
+      if (err?.status === 401) {
+        setAuthError('Authentification requise ou session expirée. Veuillez vous reconnecter.');
+      } else {
+        addNotification(err.message || 'Erreur lors de la programmation', 'error');
+      }
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  /**
+   * Ferme le modal (prop `onClose` en mode « contrôlé », sinon le store global).
+   * Si la visite a abouti, on recharge au passage les listes abonnées, puis on remet le modal à blanc.
+   */
+  const handleCloseAndReset = () => {
+    const created = Boolean(confirmedVisit);
+    if (created) {
+      requestVisitsRefresh();
+      onSuccessRefresh?.();
+    }
+    resetForm();
+    closeModal();
+    // Actualisation automatique : après un rendez-vous enregistré, on recharge la page pour
+    // repartir d'un état et de données 100 % frais (la session est ré-hydratée via le cookie).
+    if (created) {
+      window.location.reload();
     }
   };
 
@@ -62,11 +137,11 @@ export const VisitModal: React.FC = () => {
               {confirmedVisit ? 'Visite Confirmée' : 'Programmer une Visite Exclusive'}
             </h3>
             <p className="text-xs text-slate-500">
-              {property ? property.title : 'Propriété sélectionnée'}
+              {propertyName ?? (property ? property.title : 'Propriété sélectionnée')}
             </p>
           </div>
           <button
-            onClick={closeVisitModal}
+            onClick={handleCloseAndReset}
             className="p-1.5 rounded-full hover:bg-slate-200 text-slate-500 hover:text-slate-800 transition-colors"
           >
             <X className="w-5 h-5" />
@@ -83,13 +158,13 @@ export const VisitModal: React.FC = () => {
               <div>
                 <h4 className="text-base font-bold text-slate-900">Rendez-vous Enregistré</h4>
                 <p className="text-xs text-slate-600 mt-1 max-w-sm mx-auto">
-                  Votre demande pour le {new Date(confirmedVisit.scheduledDate).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} à {confirmedVisit.scheduledTime} est assignée à {property?.agent?.fullName ?? property?.landlord?.fullName ?? 'la Conciergerie Vallées Fleuries'}.
+                  Votre demande pour le {new Date(confirmedVisit.scheduledDate).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} à {confirmedVisit.scheduledTime} est assignée à {agentName ?? property?.agent?.fullName ?? property?.landlord?.fullName ?? 'la Conciergerie Vallées Fleuries'}.
                 </p>
               </div>
 
               <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-left text-xs space-y-1.5 text-emerald-900">
                 <div className="font-semibold">Détails de transmission :</div>
-                <div>· Type : {confirmedVisit.visitType === 'PHYSICAL' ? 'Visite sur site avec accompagnement privé' : 'Visite vidéo guidée en direct'}</div>
+                <div>· Type : {confirmedVisit.visitType === 'IN_PERSON' ? 'Visite sur site avec accompagnement privé' : 'Visite vidéo guidée en direct'}</div>
                 <div>· Propriété : {confirmedVisit.propertyTitle}</div>
                 <div>· Client : {confirmedVisit.userName} ({confirmedVisit.clientPhone})</div>
               </div>
@@ -107,7 +182,7 @@ export const VisitModal: React.FC = () => {
                 </a>
 
                 <button
-                  onClick={closeVisitModal}
+                  onClick={handleCloseAndReset}
                   className="w-full py-2.5 text-xs font-medium text-slate-600 hover:text-slate-900"
                 >
                   Fermer
@@ -242,6 +317,13 @@ export const VisitModal: React.FC = () => {
                   />
                 </div>
               </div>
+
+              {authError && (
+                <div className="flex items-start gap-2 p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700">
+                  <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                  <span>{authError}</span>
+                </div>
+              )}
 
               {/* Submit Button */}
               <div className="pt-2">

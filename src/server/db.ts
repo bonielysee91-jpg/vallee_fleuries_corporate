@@ -22,6 +22,10 @@ import {
   TransactionPurpose,
   VisitAppointment,
 } from '../types/index.ts';
+import {
+  isAllowedPropertyType,
+  isAllowedTransactionType,
+} from '../constants/property.ts';
 
 // -------------------------------------------------------------
 // SHARED INCLUDE SHAPES & ROW TYPES
@@ -223,6 +227,8 @@ function toDomainVisit(row: VisitRow): VisitAppointment {
     propertyTitle: row.property?.title ?? 'Visite Propriété VFC',
     commune: row.property?.commune ?? '',
     tenantId: row.tenantId,
+    // Nom du visiteur : dérivé du compte client rattaché (le schéma n'a pas de colonne dédiée).
+    userName: row.tenant?.fullName ?? '',
     clientName: row.tenant?.fullName ?? '',
     clientPhone: row.whatsappPhone,
     visitDate: row.visitDate.toISOString().split('T')[0],
@@ -238,6 +244,23 @@ function toDomainVisit(row: VisitRow): VisitAppointment {
     )}`,
     createdAt: row.createdAt.toISOString(),
   };
+}
+
+/**
+ * Traduit le format de visite du formulaire (« Visite Physique sur Site », « PHYSICAL »,
+ * « VIDEO_CALL », « VIRTUAL_3D », texte libre…) vers l'énumération Prisma stricte
+ * IN_PERSON / VIRTUAL_3D. Le format physique est la valeur par défaut de l'agence.
+ */
+function toVisitTypeEnum(raw?: string | null): 'IN_PERSON' | 'VIRTUAL_3D' {
+  const value = (raw ?? '').trim().toUpperCase();
+  const isVirtual =
+    value === 'VIDEO_CALL' ||
+    value === 'VIRTUAL_3D' ||
+    value.includes('VIDEO') ||
+    value.includes('VISIO') ||
+    value.includes('VIRTUEL') ||
+    value.includes('DISTANCIEL');
+  return isVirtual ? 'VIRTUAL_3D' : 'IN_PERSON';
 }
 
 function toDomainTransaction(row: TransactionRow): Transaction {
@@ -325,6 +348,8 @@ export interface PropertyFilters {
   furnishing?: string;
   bedrooms?: string | number;
   searchQuery?: string;
+  /** Public catalogue scope: when set, only published / available listings are returned. */
+  available?: boolean | string;
 }
 
 class PrismaRepository {
@@ -367,6 +392,14 @@ class PrismaRepository {
       ];
     }
 
+    // Public catalogue scope: hide anything not yet published or no longer available,
+    // and keep furnished short-term residences out of the public listing (retired offer).
+    // Management views (landlord / admin) omit this flag so they keep full visibility.
+    if (filters?.available === true || filters?.available === 'true') {
+      where.status = { in: ['AVAILABLE', 'PUBLISHED'] };
+      where.category = { not: 'SHORT_TERM_FURNISHED' };
+    }
+
     const rows = await prisma.property.findMany({
       where,
       include: propertyInclude,
@@ -388,6 +421,17 @@ class PrismaRepository {
   ): Promise<Property> {
     if (!data.ownerId) {
       throw new Error("Le propriétaire (ownerId) est requis pour publier une annonce locative");
+    }
+
+    // Offre strictement limitée à la Vente et à la Location longue durée :
+    // aucune annonce « meublée » / « bailleur » ne peut plus être publiée (donc aucun prix « par nuit »).
+    if (data.category && !isAllowedTransactionType(data.category)) {
+      throw new Error(
+        "Nature d'offre non autorisée : seules la Vente et la Location longue durée sont publiables."
+      );
+    }
+    if (data.type && !isAllowedPropertyType(data.type)) {
+      throw new Error('Typologie de bien non autorisée au catalogue.');
     }
 
     const baseSlug = slugify(data.title || 'propriete-locative');
@@ -519,9 +563,11 @@ class PrismaRepository {
     return rows.map(toDomainVisit);
   }
 
-  public async scheduleVisit(data: Partial<VisitAppointment>): Promise<VisitAppointment> {
-    const whatsappPhone = data.clientPhone || '+2250700000000';
-    const visitDate = new Date(data.visitDate || data.scheduledDate || Date.now());
+  public async scheduleVisit(
+    data: Partial<VisitAppointment> & { format?: string; date?: string; phone?: string }
+  ): Promise<VisitAppointment> {
+    const whatsappPhone = data.clientPhone || data.phone || '+2250700000000';
+    const visitDate = new Date(data.visitDate || data.scheduledDate || data.date || Date.now());
 
     const created = await prisma.visitAppointment.create({
       data: {
@@ -529,7 +575,10 @@ class PrismaRepository {
         tenantId: data.tenantId || data.userId!,
         visitDate,
         timeSlot: data.timeSlot || data.scheduledTime || '10:00 - 11:00',
-        type: (data.type || data.visitType || 'IN_PERSON') as Prisma.VisitAppointmentCreateInput['type'],
+        // Traduction du format du formulaire vers l'énumération Prisma stricte (IN_PERSON / VIRTUAL_3D).
+        type: toVisitTypeEnum(data.format || data.visitType || data.type),
+        // Auto-confirmation : l'écran client annonce « Visite Confirmée » et le carnet du
+        // propriétaire ne doit pas rester bloqué sur « en attente » (aucun workflow d'approbation).
         status: 'CONFIRMED',
         notes: data.notes || null,
         whatsappPhone,
@@ -553,9 +602,10 @@ class PrismaRepository {
       ? await prisma.property.findUnique({ where: { id: data.propertyId } })
       : null;
 
-    const nights = Number(data.numberOfNights || data.nightsOrMonths || 1);
-    const nightlyRate = property?.priceFcfa ?? Number(data.nightlyRateFcfa || 150_000);
-    const cleaningFee = property?.cleaningFeeFcfa ?? Number(data.cleaningFeeFcfa || 0);
+    // Offre Vente / Location longue durée uniquement : plus aucun calcul « par nuit ».
+    // Le montant est un forfait mensuel (loyer) multiplié par le nombre de mois, sans frais de nuitée.
+    const months = Number(data.nightsOrMonths || data.numberOfNights || 1);
+    const monthlyRate = property?.priceFcfa ?? Number(data.nightlyRateFcfa || 0);
 
     const created = await prisma.booking.create({
       data: {
@@ -564,11 +614,11 @@ class PrismaRepository {
         tenantId: data.tenantId!,
         checkInDate: new Date(data.checkInDate || data.startDate || Date.now()),
         checkOutDate: new Date(data.checkOutDate || data.endDate || Date.now()),
-        numberOfNights: nights,
+        numberOfNights: months,
         numberOfGuests: Number(data.numberOfGuests) || 1,
-        nightlyRateFcfa: nightlyRate,
-        cleaningFeeFcfa: cleaningFee,
-        totalAmountFcfa: nights * nightlyRate + cleaningFee,
+        nightlyRateFcfa: monthlyRate,
+        cleaningFeeFcfa: 0,
+        totalAmountFcfa: monthlyRate * months,
         status: 'CONFIRMED',
         specialRequests: data.specialRequests ?? null,
       },
@@ -603,26 +653,112 @@ class PrismaRepository {
     purpose: string;
     clientName?: string;
     propertyTitle?: string;
+    propertyId?: string;
+    bookingId?: string;
+    leaseId?: string;
   }): Promise<Transaction> {
+    // Le bien est déduit de la réservation ou du bail lorsqu'il n'est pas fourni : c'est ce
+    // rattachement qui permet, à l'encaissement, d'activer le contrat et de sortir le bien du marché.
+    let propertyId = payload.propertyId;
+    if (!propertyId && payload.bookingId) {
+      propertyId = (
+        await prisma.booking.findUnique({
+          where: { id: payload.bookingId },
+          select: { propertyId: true },
+        })
+      )?.propertyId;
+    }
+    if (!propertyId && payload.leaseId) {
+      propertyId = (
+        await prisma.leaseAgreement.findUnique({
+          where: { id: payload.leaseId },
+          select: { propertyId: true },
+        })
+      )?.propertyId;
+    }
+
     const fee = Math.round(payload.amountFcfa * 0.01); // 1 % frais Wave / Orange
     const created = await prisma.transaction.create({
       data: {
         reference: randomRef('TX-VFC-', 8),
         gatewayReference: payload.provider,
         userId: payload.userId,
+        propertyId: propertyId ?? null,
+        bookingId: payload.bookingId ?? null,
+        leaseId: payload.leaseId ?? null,
         amountFcfa: payload.amountFcfa,
         feeFcfa: fee,
         netAmountFcfa: payload.amountFcfa - fee,
         currency: 'XOF',
         paymentMethod: toPaymentMethod(payload.provider) as Prisma.TransactionCreateInput['paymentMethod'],
         purpose: toTransactionPurpose(payload.purpose) as Prisma.TransactionCreateInput['purpose'],
-        status: 'SUCCESSFUL',
+        // 🔒 La transaction naît PENDING : elle ne passe à SUCCESSFUL qu'après confirmation
+        // de l'opérateur (webhook signé → settleTransactionByReference).
+        status: 'PENDING',
         payerPhone: payload.phoneNumber,
         payerName: payload.clientName || 'Client VFC',
       },
       include: transactionInclude,
     });
     return toDomainTransaction(created);
+  }
+
+  // ---- GATEWAY WEBHOOK RECONCILIATION ----
+  // Acknowledges a Mobile Money gateway callback by its transaction reference,
+  // flips the status, stores the raw payload and takes a settled rental off the
+  // market. Backed by the existing Transaction / Property models (no parallel
+  // payment table): reference ← gateway transaction_reference, metadata ← payload.
+  public async settleTransactionByReference(payload: {
+    reference: string;
+    accepted: boolean;
+    gatewayReference?: string;
+    gatewayPayload?: unknown;
+  }): Promise<Transaction | null> {
+    const existing = await prisma.transaction.findUnique({
+      where: { reference: payload.reference },
+    });
+    if (!existing) return null;
+
+    const updated = await prisma.transaction.update({
+      where: { reference: payload.reference },
+      data: {
+        status: payload.accepted ? 'SUCCESSFUL' : 'FAILED',
+        // Référence externe de l'opérateur (Wave / CinetPay / Paystack) transmise par le
+        // callback : elle n'est écrite qu'une fois l'argent réellement encaissé.
+        ...(payload.gatewayReference ? { gatewayReference: payload.gatewayReference } : {}),
+        metadata:
+          payload.gatewayPayload !== undefined
+            ? JSON.stringify(payload.gatewayPayload)
+            : existing.metadata,
+      },
+      include: transactionInclude,
+    });
+
+    // Validation finale : une fois l'argent réellement encaissé, le contrat rattaché est activé.
+    if (payload.accepted) {
+      if (updated.bookingId) {
+        await prisma.booking.update({
+          where: { id: updated.bookingId },
+          data: { status: 'CONFIRMED' },
+        });
+      }
+      if (updated.leaseId) {
+        await prisma.leaseAgreement.update({
+          where: { id: updated.leaseId },
+          data: { status: 'ACTIVE', signedAt: new Date() },
+        });
+      }
+    }
+
+    // The schema has no "sold" state, so only rentals are taken off the market.
+    if (payload.accepted && updated.property && updated.property.category !== 'SALE') {
+      await prisma.property.update({
+        where: { id: updated.property.id },
+        data: { status: 'RENTED' },
+      });
+    }
+
+    return toDomainTransaction(updated);
   }
 
   // ---- QUITTANCES DE LOYER ----
@@ -647,7 +783,7 @@ class PrismaRepository {
         year: payload.year || now.getFullYear(),
         tenantName: payload.tenantName || 'Locataire VFC',
         tenantPhone: payload.tenantPhone || '+225 07 00 00 00 00',
-        ownerName: payload.ownerName || 'Bailleur VFC',
+        ownerName: payload.ownerName || 'Propriétaire VFC',
         propertyTitle: payload.propertyTitle || 'Appartement VFC',
         propertyAddress: payload.propertyAddress || "Abidjan, Côte d'Ivoire",
         commune: payload.commune || 'Cocody',

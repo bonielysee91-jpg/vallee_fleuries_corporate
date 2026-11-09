@@ -38,7 +38,7 @@ export const UserDashboardLayout: React.FC = () => {
             </div>
             <div className="min-w-0">
               <h1 className="text-base sm:text-lg font-bold font-serif leading-tight truncate">
-                Espace Bailleur & Gestion Locative
+                Espace Propriétaire & Gestion Locative
               </h1>
               <p className="text-xs text-amber-300 font-medium truncate">
                 {currentUser?.companyName || currentUser?.fullName} · Portefeuille Abidjan
@@ -59,7 +59,7 @@ export const UserDashboardLayout: React.FC = () => {
       {/* Section navigation for the landlord workspace */}
       <div className="bg-white/80 backdrop-blur-xl border-b border-slate-200/80 sticky top-0 z-30">
         <nav
-          aria-label="Navigation espace bailleur"
+          aria-label="Navigation espace propriétaire"
           className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center gap-1.5 overflow-x-auto py-2"
         >
           {LANDLORD_NAV.map(({ to, label, icon: Icon, end }) => (

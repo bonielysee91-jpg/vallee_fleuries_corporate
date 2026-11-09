@@ -24,7 +24,7 @@ import {
  *  · Mobile  (<768px) : frosted bar with only the VFC wordmark, an active
  *                       WhatsApp concierge button and the user avatar.
  *  · Tablet  (768-1024): wordmark + hamburger drawer (secondary links live there).
- *  · Desktop (>1024px): wordmark, « Accueil / Nos Locations / Résidences Meublées »,
+ *  · Desktop (>1024px): wordmark, « Accueil / Nos Biens / À Vendre / À Louer »,
  *                       WhatsApp action, FCFA currency badge and the profile menu.
  *
  * No search input lives in the header: searching belongs to the catalogue page
@@ -39,7 +39,7 @@ export const DynamicHeader: React.FC = () => {
 
   const whatsAppHref = `${VFC_WHATSAPP_URL}?text=${encodeURIComponent(VFC_WHATSAPP_MESSAGE)}`;
 
-  const goToCatalogue = (category: 'ALL' | 'LONG_TERM_RENT' | 'SHORT_TERM_FURNISHED') => {
+  const goToCatalogue = (category: 'ALL' | 'SALE' | 'LONG_TERM_RENT') => {
     setFilters({ category, searchQuery: '' });
     navigate('/properties');
   };
@@ -88,7 +88,7 @@ export const DynamicHeader: React.FC = () => {
               </span>
               <span className="w-1 h-1 rounded-full bg-amber-500" />
               <span className="text-[10px] text-slate-500 font-medium">
-                Locations CI
+                Vente & Location
               </span>
             </div>
           </div>
@@ -113,19 +113,31 @@ export const DynamicHeader: React.FC = () => {
                 : ''
             }`}
           >
-            Nos Locations
+            Nos Biens
           </button>
 
           <button
-            onClick={() => goToCatalogue('SHORT_TERM_FURNISHED')}
+            onClick={() => goToCatalogue('SALE')}
             className={`whitespace-nowrap transition-colors py-1 cursor-pointer hover:text-emerald-900 flex items-center gap-1.5 ${
-              currentView === 'properties' && filters.category === 'SHORT_TERM_FURNISHED'
+              currentView === 'properties' && filters.category === 'SALE'
                 ? 'text-emerald-900 font-bold border-b-2 border-emerald-700'
                 : ''
             }`}
           >
             <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-            <span>Résidences Meublées</span>
+            <span>À Vendre</span>
+          </button>
+
+          <button
+            onClick={() => goToCatalogue('LONG_TERM_RENT')}
+            className={`whitespace-nowrap transition-colors py-1 cursor-pointer hover:text-emerald-900 flex items-center gap-1.5 ${
+              currentView === 'properties' && filters.category === 'LONG_TERM_RENT'
+                ? 'text-emerald-900 font-bold border-b-2 border-emerald-700'
+                : ''
+            }`}
+          >
+            <KeyRound className="w-3.5 h-3.5 text-emerald-700" />
+            <span>À Louer</span>
           </button>
         </nav>
 
@@ -183,14 +195,14 @@ export const DynamicHeader: React.FC = () => {
             </button>
           )}
 
-          {/* ROLE: OWNER / BAILLEUR */}
+          {/* ROLE: OWNER / PROPRIÉTAIRE */}
           {isOwner && (
             <button
               onClick={() => navigate('/dashboard')}
               className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-emerald-900 to-emerald-800 text-amber-400 border border-amber-400/40 text-xs font-bold shadow-sm hover:scale-105 transition-all"
             >
               <Briefcase className="w-3.5 h-3.5" />
-              <span className="hidden xl:inline">Studio Bailleur</span>
+              <span className="hidden xl:inline">Espace Propriétaire</span>
             </button>
           )}
 
@@ -239,7 +251,7 @@ export const DynamicHeader: React.FC = () => {
                         className="w-full text-left px-3 py-2 text-xs font-medium text-slate-700 hover:bg-emerald-50 hover:text-emerald-900 rounded-lg flex items-center gap-2"
                       >
                         <Briefcase className="w-3.5 h-3.5 text-emerald-700" />
-                        <span>Studio Bailleur</span>
+                        <span>Espace Propriétaire</span>
                       </button>
                     )}
 

@@ -114,7 +114,7 @@ export const QuittanceModal: React.FC = () => {
                 {/* Landlord & Tenant details */}
                 <div className="grid grid-cols-2 gap-4 text-xs bg-slate-50 p-3.5 rounded-lg border border-slate-200/80">
                   <div>
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Bailleur / Mandant</span>
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Propriétaire / Mandant</span>
                     <p className="font-semibold text-slate-900 mt-0.5">{quittanceData.landlordName}</p>
                     <p className="text-slate-500 text-[11px]">Gestion déléguée VFC</p>
                   </div>
@@ -256,7 +256,7 @@ export const QuittanceModal: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Bailleur (Propriétaire)
+                    Propriétaire
                   </label>
                   <input
                     type="text"

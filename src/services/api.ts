@@ -142,6 +142,47 @@ export interface AdminStats {
   commissionRevenueFcfa: number;
 }
 
+export interface SchemaField {
+  name: string;
+  type: string;
+  isRequired: boolean;
+  isList: boolean;
+  isId: boolean;
+  isUnique: boolean;
+}
+
+export interface SchemaModel {
+  name: string;
+  fieldCount: number;
+  relationCount: number;
+  fields: SchemaField[];
+}
+
+export interface SchemaEnum {
+  name: string;
+  values: string[];
+}
+
+/** Structural readout of the live Neon database (no row data, metadata only). */
+export interface SystemArchitecture {
+  provider: string;
+  orm: string;
+  neon: {
+    status: string;
+    host: string;
+    database: string;
+    region: string;
+    ssl: boolean;
+    driver: string;
+    timestamp: string;
+  };
+  databaseReachable: boolean;
+  counts: { models: number; enums: number; liveTables: number };
+  models: SchemaModel[];
+  enums: SchemaEnum[];
+  liveTables: string[];
+}
+
 export const api = {
   // -----------------------------------------------------------
   // AUTHENTICATION & SESSIONS
@@ -382,6 +423,23 @@ export const api = {
   // -----------------------------------------------------------
   // PAYMENTS & MOBILE MONEY (WAVE, ORANGE, MTN, MOOV)
   // -----------------------------------------------------------
+  /**
+   * Envoie par SMS le code à valider AVANT toute exécution du débit.
+   * `devOtpCode` n'est renvoyé qu'hors production (test sans passerelle SMS).
+   */
+  async requestPaymentCode(payload: {
+    phoneNumber: string;
+  }): Promise<{
+    success: boolean;
+    /** `false` quand aucune passerelle SMS n'est configurée : le débit se fait sans code. */
+    codeRequired?: boolean;
+    message: string;
+    expiresAt?: string;
+    devOtpCode?: string;
+  }> {
+    return request('/payments/confirm-code', { method: 'POST', body: payload });
+  },
+
   async initiatePayment(payload: {
     phoneNumber: string;
     provider: string;
@@ -389,17 +447,48 @@ export const api = {
     purpose: string;
     clientName?: string;
     propertyTitle?: string;
-  }): Promise<Transaction> {
-    const json = await request<{ data: Transaction }>('/payments/initiate', {
-      method: 'POST',
-      body: payload
-    });
+    /** Rattachement optionnel au contrat : activé automatiquement à l'encaissement. */
+    propertyId?: string;
+    bookingId?: string;
+    leaseId?: string;
+    /** Code de validation reçu par SMS — obligatoire : sans lui, aucun débit n'est exécuté. */
+    confirmationCode: string;
+  }): Promise<Transaction & { paymentUrl?: string | null }> {
+    const json = await request<{ data: Transaction & { paymentUrl?: string | null } }>(
+      '/payments/initiate',
+      {
+        method: 'POST',
+        body: payload
+      }
+    );
     return json.data;
   },
 
   async getTransactions(): Promise<Transaction[]> {
-    const json = await request<{ data: Transaction[] }>('/transactions');
+    const json = await request<{ success: boolean; data: Transaction[] }>('/transactions');
     return json.data;
+  },
+
+  /**
+   * Récupère le grand livre des transactions en CSV. Le fichier est protégé par jeton :
+   * un simple lien ne fonctionnerait pas, il faut donc le charger puis le télécharger.
+   */
+  async exportPaymentsCsv(): Promise<Blob> {
+    const send = () =>
+      fetch(`${API_BASE}/admin/payments/export`, {
+        method: 'GET',
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+        credentials: 'include',
+      });
+
+    let res = await send();
+    if (res.status === 401 && (await rotateRefreshToken())) {
+      res = await send();
+    }
+    if (!res.ok) {
+      throw new ApiError("Export du grand livre impossible", res.status);
+    }
+    return res.blob();
   },
 
   // -----------------------------------------------------------
@@ -474,6 +563,14 @@ export const api = {
 
   async adminGetStats(): Promise<AdminStats> {
     const json = await request<{ data: AdminStats }>('/admin/stats');
+    return json.data;
+  },
+
+  // -----------------------------------------------------------
+  // SYSTEM ARCHITECTURE (public Neon schema readout)
+  // -----------------------------------------------------------
+  async getSystemArchitecture(): Promise<SystemArchitecture> {
+    const json = await request<{ data: SystemArchitecture }>('/system/architecture');
     return json.data;
   }
 };

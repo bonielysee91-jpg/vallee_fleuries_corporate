@@ -5,6 +5,7 @@ import { Transaction } from '../../types/index.ts';
 import {
   AlertTriangle,
   Banknote,
+  Download,
   Loader2,
   Percent,
   Receipt,
@@ -30,6 +31,28 @@ export const AdminTransactionsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [providerFilter, setProviderFilter] = useState('ALL');
   const [search, setSearch] = useState('');
+  const [exporting, setExporting] = useState(false);
+
+  /** Télécharge le grand livre complet en CSV (route admin protégée par jeton). */
+  const handleExportCsv = async () => {
+    setExporting(true);
+    try {
+      const blob = await api.exportPaymentsCsv();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `transactions-vfc-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      addNotification('Export CSV du grand livre généré.', 'success');
+    } catch (err: any) {
+      addNotification(err.message || 'Export du grand livre impossible', 'error');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -92,16 +115,31 @@ export const AdminTransactionsPage: React.FC = () => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-      <header>
-        <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-800 block">
-          Trésorerie &amp; Grand livre Mobile Money
-        </span>
-        <h1 className="font-serif text-2xl sm:text-3xl font-bold text-emerald-950 mt-1">
-          Transactions &amp; répartition des commissions
-        </h1>
-        <p className="text-xs text-slate-600 mt-1">
-          Suivi des encaissements locatifs et du partage commissions VFC / reversements bailleurs.
-        </p>
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-800 block">
+            Trésorerie &amp; Grand livre Mobile Money
+          </span>
+          <h1 className="font-serif text-2xl sm:text-3xl font-bold text-emerald-950 mt-1">
+            Transactions &amp; répartition des commissions
+          </h1>
+          <p className="text-xs text-slate-600 mt-1">
+            Suivi des encaissements locatifs et du partage commissions VFC / reversements propriétaires.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={handleExportCsv}
+          disabled={exporting}
+          className="shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-900 text-white text-xs font-bold shadow-sm hover:bg-emerald-950 transition-colors disabled:opacity-60"
+        >
+          {exporting ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Download className="w-4 h-4" />
+          )}
+          Exporter le grand livre (CSV)
+        </button>
       </header>
 
       {loading ? (
@@ -130,7 +168,7 @@ export const AdminTransactionsPage: React.FC = () => {
             {[
               { label: 'Total encaissé', value: totals.volume, icon: Wallet, tone: 'emerald' as const },
               { label: 'Commissions VFC', value: totals.commission, icon: Percent, tone: 'amber' as const },
-              { label: 'Reversements bailleurs', value: totals.payout, icon: Banknote, tone: 'emerald' as const }
+              { label: 'Reversements propriétaires', value: totals.payout, icon: Banknote, tone: 'emerald' as const }
             ].map((item) => (
               <div
                 key={item.label}
@@ -223,7 +261,7 @@ export const AdminTransactionsPage: React.FC = () => {
                     <th className="p-3.5">Objet</th>
                     <th className="p-3.5 text-right">Montant</th>
                     <th className="p-3.5 text-right">Commission VFC</th>
-                    <th className="p-3.5 text-right">Reversement bailleur</th>
+                    <th className="p-3.5 text-right">Reversement propriétaire</th>
                     <th className="p-3.5 text-center">Statut</th>
                     <th className="p-3.5">Date</th>
                   </tr>

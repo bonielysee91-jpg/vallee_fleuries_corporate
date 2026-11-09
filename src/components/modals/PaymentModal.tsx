@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../../store/useAppStore.ts';
 import { api, formatFcfa } from '../../services/api.ts';
-import { X, Smartphone, CreditCard, ShieldCheck, CheckCircle2, Loader2, ArrowRight } from 'lucide-react';
+import { X, Smartphone, CreditCard, ShieldCheck, Clock, Loader2, ArrowRight, KeyRound } from 'lucide-react';
 
 type Provider = 'WAVE' | 'ORANGE_MONEY' | 'MTN_MOMO' | 'MOOV_MONEY' | 'VISA_MASTERCARD';
 
@@ -13,13 +13,55 @@ export const PaymentModal: React.FC = () => {
   const [cardNumber, setCardNumber] = useState('');
   const [cardExpiry, setCardExpiry] = useState('');
   const [cardCvv, setCardCvv] = useState('');
-  const [paymentStep, setPaymentStep] = useState<'FORM' | 'PROCESSING' | 'SUCCESS'>('FORM');
+  const [confirmationCode, setConfirmationCode] = useState('');
+  const [devOtpCode, setDevOtpCode] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [paymentStep, setPaymentStep] = useState<'FORM' | 'CODE' | 'PROCESSING' | 'SUCCESS'>('FORM');
   const [completedTx, setCompletedTx] = useState<any>(null);
 
   if (!isPaymentModalOpen || !activePaymentDetails) return null;
 
+  /** Envoie (ou renvoie) le code de validation par SMS avant tout débit. */
+  const requestCode = async () => {
+    setIsSubmitting(true);
+    try {
+      const res = await api.requestPaymentCode({ phoneNumber });
+
+      // Sans passerelle SMS, personne ne peut recevoir de code : on débite directement
+      // plutôt que de bloquer le client sur un écran qu'il ne pourra jamais remplir.
+      if (res.codeRequired === false) {
+        await executePayment();
+        return;
+      }
+
+      setDevOtpCode(res.devOtpCode ?? null);
+      setConfirmationCode('');
+      setPaymentStep('CODE');
+      addNotification(res.message || `Code de validation envoyé au ${phoneNumber}`, 'info');
+    } catch (err: any) {
+      addNotification(err.message || "Envoi du code de validation impossible", 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleRequestCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await requestCode();
+  };
+
+  /** Le débit n'est exécuté qu'ici, une fois le code SMS validé par le serveur. */
   const handlePay = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!confirmationCode.trim()) {
+      addNotification('Saisissez le code de validation reçu par SMS', 'warning');
+      return;
+    }
+    await executePayment();
+  };
+
+  /** Exécution effective du débit Mobile Money. */
+  const executePayment = async () => {
     setPaymentStep('PROCESSING');
 
     try {
@@ -32,25 +74,47 @@ export const PaymentModal: React.FC = () => {
         amountFcfa: activePaymentDetails.amountFcfa,
         purpose: activePaymentDetails.purpose,
         clientName,
-        propertyTitle: activePaymentDetails.propertyTitle
+        propertyTitle: activePaymentDetails.propertyTitle,
+        // Rattachement contractuel : le webhook d'encaissement activera le bail /
+        // la réservation et retirera le bien du marché.
+        propertyId: activePaymentDetails.propertyId,
+        bookingId: activePaymentDetails.bookingId,
+        leaseId: activePaymentDetails.leaseId,
+        confirmationCode: confirmationCode.trim()
       });
 
       setCompletedTx(tx);
+
+      // Wave : redirection vers la page de paiement hébergée. L'argent n'est encaissé
+      // qu'après validation par le client ; le webhook signé passera alors la transaction
+      // de PENDING à SUCCESSFUL. Sans passerelle configurée, on garde l'écran « en attente ».
+      if (tx.paymentUrl) {
+        addNotification('Redirection vers la page de paiement Wave...', 'info');
+        window.location.href = tx.paymentUrl;
+        return;
+      }
+
       setPaymentStep('SUCCESS');
-      addNotification(`Paiement de ${formatFcfa(activePaymentDetails.amountFcfa)} validé avec succès !`, 'success');
+      addNotification(
+        `Paiement de ${formatFcfa(activePaymentDetails.amountFcfa)} initié — en attente de confirmation de l'opérateur.`,
+        'info'
+      );
 
       if (activePaymentDetails.onSuccessCallback) {
         activePaymentDetails.onSuccessCallback();
       }
     } catch (err: any) {
       addNotification(err.message || 'Échec de la transaction', 'error');
-      setPaymentStep('FORM');
+      // Code refusé ou expiré : on revient à la saisie. Sans code, on revient au formulaire.
+      setPaymentStep(confirmationCode.trim() ? 'CODE' : 'FORM');
     }
   };
 
   const handleClose = () => {
     setPaymentStep('FORM');
     setCompletedTx(null);
+    setConfirmationCode('');
+    setDevOtpCode(null);
     closePaymentModal();
   };
 
@@ -84,7 +148,7 @@ export const PaymentModal: React.FC = () => {
         {/* Body */}
         <div className="p-6">
           {paymentStep === 'FORM' && (
-            <form onSubmit={handlePay} className="space-y-4">
+            <form onSubmit={handleRequestCode} className="space-y-4">
               {/* Order Summary Box */}
               <div className="p-4 rounded-xl bg-emerald-50/70 border border-emerald-200/60">
                 <div className="flex justify-between items-start">
@@ -281,11 +345,111 @@ export const PaymentModal: React.FC = () => {
               <div className="pt-2">
                 <button
                   type="submit"
-                  className="w-full py-3 px-4 rounded-xl bg-emerald-900 hover:bg-emerald-800 text-white font-semibold text-xs tracking-wide shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  disabled={isSubmitting}
+                  className="w-full py-3 px-4 rounded-xl bg-emerald-900 hover:bg-emerald-800 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold text-xs tracking-wide shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  <span>Procéder au Débit de {formatFcfa(activePaymentDetails.amountFcfa)}</span>
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Envoi du code de validation...</span>
+                    </>
+                  ) : (
+                    <>
+                      <KeyRound className="w-4 h-4 text-amber-300" />
+                      <span>Recevoir le code de validation</span>
+                    </>
+                  )}
+                </button>
+                <p className="text-[10px] text-slate-500 text-center mt-2">
+                  Aucun débit n'est exécuté avant la validation du code reçu par SMS.
+                </p>
+              </div>
+            </form>
+          )}
+
+          {paymentStep === 'CODE' && (
+            <form onSubmit={handlePay} className="space-y-4">
+              <div className="p-4 rounded-xl bg-emerald-50/70 border border-emerald-200/60">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <span className="text-[11px] font-semibold text-emerald-800 uppercase tracking-wider">
+                      Objet de règlement
+                    </span>
+                    <h4 className="text-xs font-bold text-emerald-950 line-clamp-1 mt-0.5">
+                      {activePaymentDetails.purpose}
+                    </h4>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[11px] text-emerald-800 block">Montant à débiter</span>
+                    <span className="text-base font-extrabold text-emerald-900 font-mono tabular-nums">
+                      {formatFcfa(activePaymentDetails.amountFcfa)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="text-center space-y-2">
+                <div className="w-12 h-12 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto">
+                  <KeyRound className="w-6 h-6" />
+                </div>
+                <h4 className="text-sm font-bold text-slate-900">Validation du paiement</h4>
+                <p className="text-xs text-slate-600 max-w-xs mx-auto leading-relaxed">
+                  Un code de validation a été envoyé par SMS au{' '}
+                  <span className="font-mono font-semibold text-emerald-800">{phoneNumber}</span>. Saisissez-le pour
+                  autoriser le débit.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1 text-center">
+                  Code de validation à 6 chiffres
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  required
+                  autoFocus
+                  value={confirmationCode}
+                  onChange={(e) => setConfirmationCode(e.target.value.replace(/\D/g, ''))}
+                  placeholder="••••••"
+                  className="w-full px-3 py-3 text-lg rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-700 font-mono tracking-[0.5em] text-center"
+                />
+                {devOtpCode && (
+                  <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 mt-2 text-center">
+                    Environnement de test — code : <span className="font-mono font-bold">{devOtpCode}</span>
+                  </p>
+                )}
+              </div>
+
+              <div className="pt-1 space-y-2">
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full py-3 px-4 rounded-xl bg-emerald-900 hover:bg-emerald-800 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold text-xs tracking-wide shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <span>Valider &amp; Débiter {formatFcfa(activePaymentDetails.amountFcfa)}</span>
                   <ArrowRight className="w-4 h-4 text-amber-300" />
                 </button>
+
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPaymentStep('FORM')}
+                    className="text-[11px] font-semibold text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
+                  >
+                    Modifier le moyen de paiement
+                  </button>
+                  <button
+                    type="button"
+                    onClick={requestCode}
+                    disabled={isSubmitting}
+                    className="text-[11px] font-semibold text-emerald-800 hover:text-emerald-950 disabled:opacity-60 transition-colors cursor-pointer"
+                  >
+                    Renvoyer le code
+                  </button>
+                </div>
               </div>
             </form>
           )}
@@ -304,27 +468,35 @@ export const PaymentModal: React.FC = () => {
 
           {paymentStep === 'SUCCESS' && completedTx && (
             <div className="py-4 text-center space-y-4">
-              <div className="w-14 h-14 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center mx-auto shadow-inner">
-                <CheckCircle2 className="w-8 h-8" />
+              <div className="w-14 h-14 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto shadow-inner">
+                <Clock className="w-8 h-8" />
               </div>
               <div>
-                <h4 className="text-base font-bold text-slate-900">Transaction Validée</h4>
+                <h4 className="text-base font-bold text-slate-900">Paiement en attente de confirmation</h4>
                 <p className="text-xs text-slate-600 mt-0.5">
                   Référence VFC : <span className="font-mono font-bold text-emerald-800">{completedTx.reference}</span>
                 </p>
+                <p className="text-[11px] text-slate-500 mt-1.5 max-w-xs mx-auto">
+                  Votre transaction est enregistrée. Elle sera validée dès réception de la confirmation de l'opérateur
+                  Mobile Money — aucun re-paiement n'est nécessaire.
+                </p>
               </div>
 
-              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-left text-xs space-y-1 text-emerald-900">
+              <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-left text-xs space-y-1 text-amber-900">
                 <div className="flex justify-between">
-                  <span className="text-emerald-700">Montant :</span>
+                  <span className="text-amber-700">Montant :</span>
                   <span className="font-mono font-bold">{formatFcfa(completedTx.amountFcfa)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-emerald-700">Moyen :</span>
+                  <span className="text-amber-700">Moyen :</span>
                   <span className="font-bold">{completedTx.paymentProvider}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-emerald-700">Horodatage :</span>
+                  <span className="text-amber-700">Statut :</span>
+                  <span className="font-bold">En attente</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-amber-700">Horodatage :</span>
                   <span>{new Date(completedTx.createdAt).toLocaleString('fr-FR')}</span>
                 </div>
               </div>

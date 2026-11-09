@@ -4,6 +4,7 @@ import { api } from '../../services/api.ts';
 import { Search, MapPin, Building, ShieldCheck, Sparkles, CheckCircle2 } from 'lucide-react';
 import { RentalCategory, City } from '../../types/index.ts';
 import { VFC_MEDIA } from '../../constants/media.ts';
+import { PROPERTY_TYPE_OPTIONS } from '../../constants/property.ts';
 
 export const HeroSection: React.FC = () => {
   const { setFilters, setView } = useAppStore();
@@ -48,27 +49,27 @@ export const HeroSection: React.FC = () => {
         <div className="space-y-4 max-w-3xl mx-auto">
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full liquid-glass-dark text-amber-300 text-xs font-semibold tracking-wide border border-amber-400/20 shadow-lg">
             <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            <span>L'Excellence Locative Ivoirienne · Baux Certifiés & Résidences Meublées</span>
+            <span>L'Immobilier de Prestige Ivoirien · Vente & Location de Maisons</span>
           </div>
 
           <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold text-white font-serif tracking-tight leading-[1.12] text-balance">
-            La référence absolue de la location de prestige à Abidjan.
+            Trouvez la maison idéale, à l'achat ou à la location.
           </h1>
 
           <p className="text-sm sm:text-base text-slate-200/90 font-normal max-w-2xl mx-auto leading-relaxed">
-            Résidences diplomatiques à Cocody, penthouses d'affaires au Plateau, duplex contemporains en Zone 4 et villas pieds dans l'eau à Assinie.
+            Villas de prestige à Cocody, penthouses d'affaires au Plateau, duplex contemporains en Zone 4 et maisons pieds dans l'eau à Assinie — à vendre et à louer.
           </p>
         </div>
 
         {/* Liquid Glass Dynamic Multi-Filter Bar */}
         <div className="max-w-4xl mx-auto liquid-glass rounded-2xl p-4 sm:p-5 shadow-2xl border border-white/40">
           
-          {/* Strictly Rental Formulas Tabs */}
+          {/* Offer Type Tabs: Vente & Location */}
           <div className="flex items-center justify-center gap-2 mb-4 overflow-x-auto pb-1">
             {[
-              { id: 'ALL', label: 'Toutes les Locations' },
-              { id: 'LONG_TERM_RENT', label: 'Location Longue Durée (Bail 1 an+)' },
-              { id: 'SHORT_TERM_FURNISHED', label: 'Résidences Meublées (Séjours Courts)' },
+              { id: 'ALL', label: 'Toutes les maisons' },
+              { id: 'SALE', label: 'À Vendre' },
+              { id: 'LONG_TERM_RENT', label: 'À Louer' },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -115,7 +116,7 @@ export const HeroSection: React.FC = () => {
             {/* Property Type (NO Land parcels!) */}
             <div className="text-left bg-white/90 rounded-xl px-3.5 py-2.5 border border-slate-200/80">
               <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                Type de bien locatif
+                Type de bien
               </label>
               <div className="flex items-center gap-2 mt-0.5">
                 <Building className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
@@ -124,12 +125,11 @@ export const HeroSection: React.FC = () => {
                   onChange={(e) => useAppStore.getState().setFilters({ propertyType: e.target.value as any })}
                 >
                   <option value="ALL">Tous types</option>
-                  <option value="VILLA">Villa de Standing</option>
-                  <option value="PENTHOUSE">Penthouse Panoramique</option>
-                  <option value="DUPLEX">Duplex Familial</option>
-                  <option value="APARTMENT">Appartement Exécutif</option>
-                  <option value="STUDIO">Studio Meublé</option>
-                  <option value="COMMERCIAL">Bureaux Corporate</option>
+                  {PROPERTY_TYPE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -172,7 +172,7 @@ export const HeroSection: React.FC = () => {
         <div className="flex flex-wrap items-center justify-center gap-6 sm:gap-10 text-xs text-slate-200/85">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>Loi N° 2019-576 : 2 mois avance + 2 mois caution</span>
+            <span>Vente & Location · Dossiers et actes sécurisés</span>
           </div>
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0" />
@@ -180,7 +180,7 @@ export const HeroSection: React.FC = () => {
           </div>
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>Baux d'Habitation & Quittances Numérisées</span>
+            <span>Baux & Actes de Vente Numérisés</span>
           </div>
         </div>
 

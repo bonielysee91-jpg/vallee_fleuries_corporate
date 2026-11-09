@@ -104,7 +104,7 @@ export const NeighborhoodsSection: React.FC = () => {
               </h3>
 
               <p className="text-[11px] text-slate-300 line-clamp-2 leading-relaxed">
-                {city.description || `Locations longue durée et résidences meublées à ${city.name}.`}
+                {city.description || `Locations longue durée et biens vérifiés à ${city.name}.`}
               </p>
 
               <div className="pt-2 border-t border-white/15 flex flex-wrap gap-1">

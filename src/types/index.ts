@@ -1,13 +1,24 @@
 // Vallées Fleuries Corporate - Domain Types & Interfaces
-// Strictly Dedicated EXCLUSIVELY to Property Rentals (Long-Term Rentals & Furnished Short-Term Residences)
+// Plateforme immobilière ivoirienne : VENTE et LOCATION de maisons & villas.
+// (Offre publique limitée à la Vente et à la Location longue durée.)
 
 export type UserRole = 'TENANT' | 'OWNER' | 'AGENT' | 'ADMIN' | 'SUPER_ADMIN';
 
-export type RentalCategory = 
+/**
+ * Nature de l'offre publiée au catalogue.
+ *  - SALE                  : Vente (acquisition définitive d'une maison / villa)
+ *  - LONG_TERM_RENT        : Location Longue Durée (bail 1 an+)
+ *  - SHORT_TERM_FURNISHED  : héritage — conservée en base, retirée du catalogue public
+ */
+export type ListingCategory =
+  | 'SALE'                  // Vente (acquisition définitive)
   | 'LONG_TERM_RENT'        // Location Longue Durée (Bail 1 an+)
-  | 'SHORT_TERM_FURNISHED'; // Résidence Meublée de Prestige (Nuit / Semaine)
+  | 'SHORT_TERM_FURNISHED'; // Héritage (retirée du catalogue public)
 
-export type TransactionCategory = RentalCategory;
+export type TransactionCategory = ListingCategory;
+
+/** Alias historique conservé pour les modules encore nommés « rental ». */
+export type RentalCategory = ListingCategory;
 
 export type PropertyType = 
   | 'APARTMENT'
@@ -41,15 +52,7 @@ export type PaymentMethod =
   | 'VISA_MASTERCARD'
   | 'BANK_TRANSFER';
 
-export type TransactionStatus =
-  | 'PENDING'
-  | 'PROCESSING'
-  | 'SUCCESSFUL'
-  | 'COMPLETED'
-  | 'FAILED'
-  | 'REFUNDED'
-  | 'INSUFFICIENT_FUNDS'
-  | 'TECHNICAL_ERROR';
+export type TransactionStatus = 'PENDING' | 'PROCESSING' | 'SUCCESSFUL' | 'COMPLETED' | 'FAILED' | 'REFUNDED';
 
 export type TransactionPurpose = 
   | 'SHORT_STAY_BOOKING'
@@ -120,7 +123,7 @@ export interface Property {
   title: string;
   slug: string;
   description: string;
-  category: RentalCategory;
+  category: ListingCategory;
   type: PropertyType;
   status: PropertyStatus;
   furnishing: FurnishingStatus;
@@ -134,7 +137,7 @@ export interface Property {
   agencyFeeMonths: number;  // Standard Ivorian Agency Fee: 1 mois d'honoraires
   keyMoneyFcfa?: number;    // Pas de porte éventuel
   serviceChargeFcfa?: number; // Charges copropriété mensuelles
-  cleaningFeeFcfa?: number; // Frais de ménage pour meublés
+  cleaningFeeFcfa?: number; // Frais de ménage (héritage)
   isNegotiable: boolean;
 
   // Geographical Location (Abidjan & Côte d'Ivoire)
@@ -336,7 +339,7 @@ export interface QuittanceLoyer {
 export type RentQuittance = QuittanceLoyer;
 
 export interface FilterState {
-  category?: RentalCategory | 'ALL';
+  category?: ListingCategory | 'ALL';
   commune?: string;
   type?: PropertyType | 'ALL';
   propertyType?: PropertyType | 'ALL';

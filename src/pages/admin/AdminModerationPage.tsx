@@ -113,7 +113,7 @@ export const AdminModerationPage: React.FC = () => {
             File de modération des annonces
           </h1>
           <p className="text-xs text-slate-600 mt-1">
-            Vérification des mandats bailleurs et des états des lieux avant mise en ligne.
+            Vérification des mandats propriétaires et des états des lieux avant mise en ligne.
           </p>
         </div>
         <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-100 text-amber-800 text-xs font-bold">
@@ -175,7 +175,7 @@ export const AdminModerationPage: React.FC = () => {
       ) : (
         <div className="space-y-4">
           {visible.map((prop) => {
-            const perLabel = prop.category === 'LONG_TERM_RENT' ? '/ mois' : '/ nuitée';
+            const perLabel = prop.category === 'SALE' ? '' : '/ mois';
             return (
               <article
                 key={prop.id}
@@ -209,11 +209,11 @@ export const AdminModerationPage: React.FC = () => {
                       <span className="inline-flex items-center gap-1.5">
                         <Landmark className="w-3.5 h-3.5 text-emerald-700" />
                         <span className="font-bold text-emerald-800">
-                          {prop.category === 'LONG_TERM_RENT' ? 'Bail longue durée' : 'Meublé courte durée'}
+                          {prop.category === 'SALE' ? 'Vente' : 'Location longue durée'}
                         </span>
                         <span aria-hidden="true">·</span>
                         <span>
-                          {prop.furnishing === 'FULLY_FURNISHED' ? 'Meublé' : 'Non meublé'}
+                          {prop.furnishing === 'FULLY_FURNISHED' ? 'Équipé' : 'Non équipé'}
                         </span>
                       </span>
                       <span className="inline-flex items-center gap-1.5">

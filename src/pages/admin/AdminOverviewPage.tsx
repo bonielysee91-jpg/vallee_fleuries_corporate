@@ -31,13 +31,13 @@ const QUICK_LINKS = [
     to: '/admin/moderation',
     icon: ListChecks,
     title: 'File de modération des annonces',
-    description: 'Homologuer les mandats bailleurs en attente et publier les annonces locatives.'
+    description: 'Homologuer les mandats propriétaires en attente et publier les annonces locatives.'
   },
   {
     to: '/admin/transactions',
     icon: Receipt,
     title: 'Grand livre Mobile Money',
-    description: 'Auditer les encaissements et la répartition commissions / bailleurs.'
+    description: 'Auditer les encaissements et la répartition commissions / propriétaires.'
   },
   {
     to: '/admin/audit-logs',
@@ -174,7 +174,7 @@ export const AdminOverviewPage: React.FC = () => {
             <h2 className="font-serif text-base font-bold">Conformité locative</h2>
           </div>
           <p className="text-xs text-slate-600 leading-relaxed">
-            Chaque mandat bailleur et chaque état des lieux sont contrôlés avant publication.
+            Chaque mandat propriétaire et chaque état des lieux sont contrôlés avant publication.
             La plateforme applique strictement le
             plafonnement légal de <strong>2 mois d'avance</strong> et <strong>2 mois de caution</strong>
             {' '}prévu par la <strong>Loi N° 2019-576 du 26 juin 2019</strong>, ainsi que le
@@ -194,8 +194,8 @@ export const AdminOverviewPage: React.FC = () => {
           </div>
           <p className="text-xs text-slate-600 leading-relaxed">
             Les règlements locatifs sont encaissés via les passerelles Mobile Money agréées,
-            séquestrés jusqu'à la signature authentique du bail puis reversés au bailleur selon la
-            répartition commissions VFC / reversement bailleur.
+            séquestrés jusqu'à la signature authentique du bail puis reversés au propriétaire selon la
+            répartition commissions VFC / reversement propriétaire.
           </p>
           <ul className="flex flex-wrap gap-2">
             {MOBILE_MONEY_PROVIDERS.map((provider) => (

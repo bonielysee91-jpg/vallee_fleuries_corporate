@@ -4,6 +4,11 @@ import { useAppStore } from '../../store/useAppStore.ts';
 import { api, formatFcfa } from '../../services/api.ts';
 import { FurnishingStatus, PropertyType, RentalCategory } from '../../types/index.ts';
 import {
+  ALLOWED_PROPERTY_TYPES,
+  PROPERTY_TYPE_LABELS,
+  TRANSACTION_TYPE_LABELS
+} from '../../constants/property.ts';
+import {
   ArrowLeft,
   ArrowRight,
   Building2,
@@ -15,16 +20,17 @@ import {
   Send
 } from 'lucide-react';
 
+// Natures d'offre autorisées : Vente & Location uniquement (cf. référentiel des biens).
 const CATEGORIES: { id: RentalCategory; label: string; hint: string }[] = [
-  { id: 'LONG_TERM_RENT', label: 'Location longue durée', hint: 'Bail d\'un an et plus' },
-  { id: 'SHORT_TERM_FURNISHED', label: 'Résidence meublée', hint: 'Nuitée / semaine' }
+  { id: 'SALE', label: TRANSACTION_TYPE_LABELS.SALE, hint: 'Acquisition définitive' },
+  { id: 'LONG_TERM_RENT', label: TRANSACTION_TYPE_LABELS.LONG_TERM_RENT, hint: 'Location d\'un an et plus' }
 ];
 
-const TYPES: PropertyType[] = ['APARTMENT', 'VILLA', 'STUDIO', 'DUPLEX', 'PENTHOUSE', 'COMMERCIAL'];
+const TYPES: PropertyType[] = ALLOWED_PROPERTY_TYPES;
 const FURNISHINGS: { id: FurnishingStatus; label: string }[] = [
-  { id: 'UNFURNISHED', label: 'Non meublé' },
-  { id: 'SEMI_FURNISHED', label: 'Semi-meublé' },
-  { id: 'FULLY_FURNISHED', label: 'Entièrement meublé' }
+  { id: 'UNFURNISHED', label: 'Non équipé' },
+  { id: 'SEMI_FURNISHED', label: 'Partiellement équipé' },
+  { id: 'FULLY_FURNISHED', label: 'Entièrement équipé' }
 ];
 const COMMUNES = ['Cocody', 'Marcory', 'Yopougon', 'Plateau', 'Riviera'];
 
@@ -164,13 +170,13 @@ export const PropertyWizardPage: React.FC = () => {
                 >
                   {TYPES.map((type) => (
                     <option key={type} value={type}>
-                      {type}
+                      {PROPERTY_TYPE_LABELS[type]}
                     </option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className={labelClass}>Ameublement</label>
+                <label className={labelClass}>Équipement</label>
                 <select
                   value={form.furnishing}
                   onChange={(e) => update('furnishing', e.target.value as FurnishingStatus)}
@@ -294,7 +300,7 @@ export const PropertyWizardPage: React.FC = () => {
             <div className="grid sm:grid-cols-2 gap-4">
               <div>
                 <label className={labelClass}>
-                  {form.category === 'LONG_TERM_RENT' ? 'Loyer mensuel (FCFA)' : 'Tarif par nuit (FCFA)'}
+                  {form.category === 'SALE' ? 'Prix de vente (FCFA)' : 'Loyer mensuel (FCFA)'}
                 </label>
                 <input
                   type="number"
@@ -359,15 +365,15 @@ export const PropertyWizardPage: React.FC = () => {
             <dl className="grid sm:grid-cols-2 gap-3">
               {[
                 { label: 'Titre', value: form.title || '—' },
-                { label: 'Offre', value: form.category === 'LONG_TERM_RENT' ? 'Longue durée' : 'Meublé court séjour' },
+                { label: 'Offre', value: form.category === 'SALE' ? 'Vente' : 'Longue durée' },
                 { label: 'Typologie', value: form.type },
-                { label: 'Ameublement', value: form.furnishing },
+                { label: 'Équipement', value: form.furnishing },
                 { label: 'Commune', value: `${form.commune} · ${form.neighborhood || 'Abidjan'}` },
                 { label: 'Adresse', value: form.address || '—' },
                 { label: 'Surface', value: `${form.surfaceM2} m²` },
                 { label: 'Chambres / Salles d\'eau', value: `${form.bedrooms} / ${form.bathrooms}` },
                 {
-                  label: form.category === 'LONG_TERM_RENT' ? 'Loyer mensuel' : 'Tarif nocturne',
+                  label: form.category === 'SALE' ? 'Prix de vente' : 'Loyer mensuel',
                   value: formatFcfa(form.priceFcfa)
                 },
                 { label: 'Charges', value: formatFcfa(form.serviceChargeFcfa) }

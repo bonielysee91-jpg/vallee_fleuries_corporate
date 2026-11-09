@@ -9,28 +9,35 @@ import { VisitModal } from '../modals/VisitModal.tsx';
 import { PaymentModal } from '../modals/PaymentModal.tsx';
 import { VirtualTourModal } from '../modals/VirtualTourModal.tsx';
 import { QuittanceModal } from '../modals/QuittanceModal.tsx';
+import { useAppStore } from '../../store/useAppStore.ts';
 
 /**
  * Chrome shared by every public / client route: adaptive header, footer,
  * mobile bottom bar, tablet drawer and the transactional modals.
  */
-export const PublicLayout: React.FC = () => (
-  <div className="min-h-screen flex flex-col bg-[#F8FAFC] text-[#0F172A] selection:bg-emerald-700 selection:text-white font-sans antialiased pb-20 md:pb-0">
-    <DynamicHeader />
+export const PublicLayout: React.FC = () => {
+  const isVisitModalOpen = useAppStore((state) => state.isVisitModalOpen);
 
-    <main className="flex-1">
-      <Outlet />
-    </main>
+  return (
+    <div className="min-h-screen flex flex-col bg-[#F8FAFC] text-[#0F172A] selection:bg-emerald-700 selection:text-white font-sans antialiased pb-20 md:pb-0">
+      <DynamicHeader />
 
-    <Footer />
+      <main className="flex-1">
+        <Outlet />
+      </main>
 
-    <MobileBottomNav />
-    <TabletDrawer />
-    <MobileSearchDrawer />
+      <Footer />
 
-    <VisitModal />
-    <PaymentModal />
-    <VirtualTourModal />
-    <QuittanceModal />
-  </div>
-);
+      <MobileBottomNav />
+      <TabletDrawer />
+      <MobileSearchDrawer />
+
+      {/* Montage conditionnel : le modal est démonté puis remonté à chaque ouverture,
+          ce qui force un état vierge (formulaire à blanc, aucun écran de succès résiduel). */}
+      {isVisitModalOpen && <VisitModal />}
+      <PaymentModal />
+      <VirtualTourModal />
+      <QuittanceModal />
+    </div>
+  );
+};

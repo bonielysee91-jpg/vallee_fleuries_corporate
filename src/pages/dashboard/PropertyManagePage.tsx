@@ -24,8 +24,9 @@ const STATUS_OPTIONS: { value: PropertyStatus; label: string; className: string 
 ];
 
 const CATEGORY_LABELS: Record<Property['category'], string> = {
-  LONG_TERM_RENT: 'Longue durée',
-  SHORT_TERM_FURNISHED: 'Meublé courte durée'
+  SALE: 'Vente',
+  LONG_TERM_RENT: 'Location longue durée',
+  SHORT_TERM_FURNISHED: 'Location'
 };
 
 const categoryLabel = (category: Property['category']): string =>
@@ -38,7 +39,7 @@ const statusMeta = (status: PropertyStatus) =>
     className: 'bg-slate-100 text-slate-600 border-slate-200'
   };
 
-/** `/dashboard/properties/manage` — table CRUD des biens du bailleur. */
+/** `/dashboard/properties/manage` — table CRUD des biens du propriétaire. */
 export const PropertyManagePage: React.FC = () => {
   const addNotification = useAppStore((state) => state.addNotification);
 
@@ -114,7 +115,7 @@ export const PropertyManagePage: React.FC = () => {
   };
 
   const priceSuffix = (category: Property['category']) =>
-    category === 'LONG_TERM_RENT' ? '/ mois' : '/ nuitée';
+    category === 'SALE' ? '' : '/ mois';
 
   const inputClass =
     'w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#D97706]';

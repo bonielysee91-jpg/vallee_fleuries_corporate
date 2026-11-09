@@ -52,6 +52,8 @@ export function pathForView(view: string, propertyId?: string | null): string {
       return propertyId ? `/properties/${propertyId}` : '/properties';
     case 'estimator':
       return '/estimator';
+    case 'architecture':
+      return '/architecture';
     case 'dashboard':
       return '/dashboard';
     case 'admin':

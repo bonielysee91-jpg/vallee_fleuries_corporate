@@ -110,7 +110,7 @@ export const MyRentalsPage: React.FC = () => {
             Réservation {booking.bookingNumber}
           </span>
           <h3 className="font-serif text-base font-bold text-slate-900 mt-2">
-            {booking.propertyTitle || 'Résidence meublée'}
+            {booking.propertyTitle || 'Bien locatif'}
           </h3>
           <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1.5">
             <MapPin className="w-3.5 h-3.5 text-emerald-700" />
@@ -132,7 +132,7 @@ export const MyRentalsPage: React.FC = () => {
           <p className="text-xs font-bold text-slate-900 mt-0.5">{formatDate(booking.checkOutDate)}</p>
         </div>
         <div className="rounded-2xl bg-slate-50 border border-slate-100 px-3 py-2.5">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Nuitées</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Réservations</p>
           <p className="text-xs font-bold text-slate-900 mt-0.5">{booking.numberOfNights}</p>
         </div>
         <div className="rounded-2xl bg-slate-50 border border-slate-100 px-3 py-2.5">
@@ -154,7 +154,7 @@ export const MyRentalsPage: React.FC = () => {
           Mes locations & séjours
         </h1>
         <p className="text-xs text-slate-500 mt-1">
-          Baux longue durée en cours et réservations de résidences meublées.
+          Baux longue durée en cours et réservations de biens locatifs.
         </p>
       </header>
 

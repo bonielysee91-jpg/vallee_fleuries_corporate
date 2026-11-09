@@ -15,10 +15,9 @@
  */
 
 import 'dotenv/config';
-import { PrismaClient, UserRole, RentalCategory, PropertyType, PropertyStatus, FurnishingStatus } from '@prisma/client';
+import { UserRole, RentalCategory, PropertyType, PropertyStatus, FurnishingStatus } from '@prisma/client';
 import { hashPassword } from '../src/server/auth.ts';
-
-const prisma = new PrismaClient();
+import { prisma } from '../src/server/prisma.ts';
 
 /** Shared Unsplash CDN query so every image is delivered pre-optimised. */
 const img = (id: string) => `https://images.unsplash.com/${id}?auto=format&fit=crop&w=1600&q=80`;
@@ -617,7 +616,7 @@ export async function seedDatabase() {
     { key: 'LEGAL_ADVANCE_MONTHS', value: '2', description: 'Plafond légal avance de loyer (Loi CI 2019-576)' },
     { key: 'LEGAL_DEPOSIT_MONTHS', value: '2', description: 'Plafond légal caution de garantie (Loi CI 2019-576)' },
     { key: 'AGENCY_FEE_MONTHS', value: '1', description: 'Honoraires agence standard' },
-    { key: 'WHATSAPP_CONTACT', value: 'https://wa.me/2250707204745', description: 'Contact WhatsApp direct VFC' },
+    { key: 'WHATSAPP_CONTACT', value: 'https://wa.me/2250173839518', description: 'Contact WhatsApp direct VFC' },
     { key: 'WAVE_WEBHOOK_URL', value: 'https://valleesfleuries.ci/api/payments/webhook', description: 'Webhook Mobile Money Wave' },
     { key: 'ORANGE_MONEY_WEBHOOK_URL', value: 'https://valleesfleuries.ci/api/payments/webhook', description: 'Webhook Orange Money CI' },
   ];

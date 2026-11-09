@@ -22,7 +22,7 @@ const ROLE_OPTIONS: UserRole[] = ['TENANT', 'OWNER', 'AGENT', 'ADMIN', 'SUPER_AD
 
 const ROLE_LABELS: Record<UserRole, string> = {
   TENANT: 'Locataire',
-  OWNER: 'Bailleur',
+  OWNER: 'Propriétaire',
   AGENT: 'Agent',
   ADMIN: 'Administrateur',
   SUPER_ADMIN: 'Super-Admin'

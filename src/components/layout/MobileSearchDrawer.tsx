@@ -3,6 +3,7 @@ import { useAppStore } from '../../store/useAppStore.ts';
 import { api } from '../../services/api.ts';
 import { X, Search, SlidersHorizontal, MapPin, Building, KeyRound, Check } from 'lucide-react';
 import { PropertyType } from '../../types/index.ts';
+import { PROPERTY_TYPE_OPTIONS } from '../../constants/property.ts';
 
 export const MobileSearchDrawer: React.FC = () => {
   const { 
@@ -30,11 +31,7 @@ export const MobileSearchDrawer: React.FC = () => {
 
   const TYPES: { value: PropertyType | 'ALL'; label: string }[] = [
     { value: 'ALL', label: 'Tous types' },
-    { value: 'VILLA', label: 'Villas' },
-    { value: 'PENTHOUSE', label: 'Penthouses' },
-    { value: 'DUPLEX', label: 'Duplex' },
-    { value: 'APARTMENT', label: 'Appartements' },
-    { value: 'STUDIO', label: 'Studios' }
+    ...PROPERTY_TYPE_OPTIONS
   ];
 
   const handleApply = () => {
@@ -72,12 +69,32 @@ export const MobileSearchDrawer: React.FC = () => {
         {/* Scrollable Filter Controls */}
         <div className="flex-1 overflow-y-auto p-5 space-y-6">
           
-          {/* 1. Rental Category Toggle */}
+          {/* 1. Offer Type Toggle (Vente & Location) */}
           <div>
             <label className="text-xs font-bold uppercase tracking-wider text-slate-600 block mb-2">
-              Formule Locative
+              Type d'Offre
             </label>
-            <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-xl">
+            <div className="grid grid-cols-3 gap-2 bg-slate-100 p-1 rounded-xl">
+              <button
+                onClick={() => setFilters({ category: 'ALL' })}
+                className={`py-2.5 px-3 rounded-lg text-xs font-bold transition-all ${
+                  filters.category === 'ALL'
+                    ? 'bg-emerald-900 text-white shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Tous
+              </button>
+              <button
+                onClick={() => setFilters({ category: 'SALE' })}
+                className={`py-2.5 px-3 rounded-lg text-xs font-bold transition-all ${
+                  filters.category === 'SALE'
+                    ? 'bg-emerald-900 text-white shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                À Vendre
+              </button>
               <button
                 onClick={() => setFilters({ category: 'LONG_TERM_RENT' })}
                 className={`py-2.5 px-3 rounded-lg text-xs font-bold transition-all ${
@@ -86,17 +103,7 @@ export const MobileSearchDrawer: React.FC = () => {
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Bail Longue Durée
-              </button>
-              <button
-                onClick={() => setFilters({ category: 'SHORT_TERM_FURNISHED' })}
-                className={`py-2.5 px-3 rounded-lg text-xs font-bold transition-all ${
-                  filters.category === 'SHORT_TERM_FURNISHED'
-                    ? 'bg-emerald-900 text-white shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Résidence Meublée
+                À Louer
               </button>
             </div>
           </div>

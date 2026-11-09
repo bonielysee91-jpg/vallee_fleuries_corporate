@@ -4,24 +4,38 @@
  * A single shared client for the whole Express process. Neon scales to zero and
  * suspends idle computes, so the client is created once and reused rather than
  * per-request (which would exhaust Postgres connections).
+ *
+ * Connectivity goes through the Neon serverless driver adapter
+ * (@prisma/adapter-neon): queries travel over Neon's HTTPS/WebSocket endpoint
+ * instead of a raw TCP 5432 socket, which is the recommended setup for
+ * serverless Node runtimes and avoids the native query-engine socket path.
  */
 
 import { PrismaClient } from '@prisma/client';
+import { PrismaNeon } from '@prisma/adapter-neon';
+import { neonConfig } from '@neondatabase/serverless';
+import ws from 'ws';
+
+// Node < 22 has no global WebSocket; the Neon driver needs an explicit one.
+neonConfig.webSocketConstructor = ws;
 
 declare global {
   // eslint-disable-next-line no-var
   var __vfcPrisma: PrismaClient | undefined;
 }
 
-function createPrismaClient(): PrismaClient {
-  if (!process.env.DATABASE_URL) {
+export function createPrismaClient(): PrismaClient {
+  const connectionString = process.env.DATABASE_URL;
+
+  if (!connectionString) {
     throw new Error(
       'DATABASE_URL is not configured. Copy the Neon connection string into .env before starting the server.'
     );
   }
 
   return new PrismaClient({
-    log: process.env.NODE_ENV === 'production' ? ['error', 'warn'] : ['error', 'warn'],
+    adapter: new PrismaNeon({ connectionString }),
+    log: ['error', 'warn'],
   });
 }
 

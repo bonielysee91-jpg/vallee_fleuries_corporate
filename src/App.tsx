@@ -3,7 +3,9 @@
  * High-Performance African Web Application
  *
  * Routing architecture (React Router v7):
- *  - PUBLIC            /, /properties, /properties/:id, /estimator
+ *  - PUBLIC            /, /accueil, /properties (+ /nos-biens alias), /properties/:id, /estimator
+ *  - INFRASTRUCTURE    /architecture — live Neon PostgreSQL schema readout (never linked publicly)
+ *  - LEGACY / 404      any unknown path redirects to /
  *  - AUTH PORTAL       /login, /register            (standalone liquid-glass shell)
  *  - CLIENT  (TENANT|OWNER|ADMIN)   /favorites, /my-rentals, /profile/settings
  *  - LANDLORD (OWNER|AGENT|ADMIN)   /dashboard/*
@@ -11,7 +13,7 @@
  */
 
 import React, { useLayoutEffect } from 'react';
-import { BrowserRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 
 import { AuthProvider } from './components/auth/AuthProvider.tsx';
 import { ProtectedRoute } from './components/auth/ProtectedRoute.tsx';
@@ -25,7 +27,7 @@ import { AuthPage } from './pages/AuthPage.tsx';
 import { FavoritesPage } from './pages/FavoritesPage.tsx';
 import { MyRentalsPage } from './pages/MyRentalsPage.tsx';
 import { ProfileSettingsPage } from './pages/ProfileSettingsPage.tsx';
-import { NotFoundPage } from './pages/NotFoundPage.tsx';
+import { SystemArchitecturePage } from './pages/SystemArchitecturePage.tsx';
 
 import { PropertyWizardPage } from './pages/dashboard/PropertyWizardPage.tsx';
 import { PropertyManagePage } from './pages/dashboard/PropertyManagePage.tsx';
@@ -86,7 +88,9 @@ export default function App() {
           {/* ---------- PUBLIC SHELL ---------- */}
           <Route element={<PublicLayout />}>
             <Route path="/" element={<HomePage />} />
+            <Route path="/accueil" element={<HomePage />} />
             <Route path="/properties" element={<PropertyExplorer />} />
+            <Route path="/nos-biens" element={<PropertyExplorer />} />
             <Route path="/properties/:id" element={<PropertyDetail />} />
             <Route
               path="/estimator"
@@ -96,6 +100,9 @@ export default function App() {
                 </div>
               }
             />
+
+            {/* Live Neon PostgreSQL schema readout — reachable at its own URL, never linked publicly. */}
+            <Route path="/architecture" element={<SystemArchitecturePage />} />
 
             {/* ---------- CLIENT SPACE (TENANT | OWNER | ADMIN) ---------- */}
             <Route
@@ -123,7 +130,8 @@ export default function App() {
               }
             />
 
-            <Route path="*" element={<NotFoundPage />} />
+            {/* Global 404 fallback: unknown paths are bounced back to the home page. */}
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
 
           {/* ---------- LANDLORD / AGENCE WORKSPACE (OWNER | AGENT | ADMIN) ---------- */}

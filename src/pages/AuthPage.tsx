@@ -220,8 +220,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({ mode }) => {
               <span className="block text-amber-400">d'exception à Abidjan</span>
             </h1>
             <p className="mt-5 text-sm text-emerald-100/75 leading-relaxed">
-              Plateforme exclusivement dédiée à la location longue durée et aux résidences meublées de
-              prestige. Un portail unique pour les locataires, les bailleurs et la Direction Générale.
+              Plateforme exclusivement dédiée à la vente et à la location longue durée de biens
+              vérifiés. Un portail unique pour les locataires, les propriétaires et la Direction Générale.
             </p>
 
             <ul className="mt-8 space-y-3">
@@ -429,7 +429,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ mode }) => {
                                 }`}
                               >
                                 <Briefcase className="w-3.5 h-3.5" />
-                                Bailleur
+                                Propriétaire
                               </button>
                             </div>
                           </div>

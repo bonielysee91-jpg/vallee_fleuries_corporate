@@ -5,8 +5,9 @@ import { Property, FilterState } from '../../types/index.ts';
 import { FALLBACK_PROPERTY_IMAGE } from '../../constants/media.ts';
 import { 
   Search, SlidersHorizontal, MapPin, Zap, Droplets, Shield, 
-  Bed, Bath, Maximize, Heart, ArrowUpRight, Compass, Layers, Check
+  Bed, Bath, Maximize, Heart, ArrowUpRight, Compass, Layers, Check, Phone
 } from 'lucide-react';
+import { VFC_WHATSAPP_NUMBER, VFC_WHATSAPP_DISPLAY } from '../../constants/contact.ts';
 
 export const PropertyExplorer: React.FC = () => {
   const { filters, setFilters, resetFilters, setSelectedPropertyId, setView, favorites, toggleFavorite, openVisitModal } = useAppStore();
@@ -19,7 +20,7 @@ export const PropertyExplorer: React.FC = () => {
 
   useEffect(() => {
     setLoading(true);
-    api.getProperties(filters as any).then((data) => {
+    api.getProperties({ ...filters, available: true } as any).then((data) => {
       setProperties(data);
       if (data.length > 0 && !selectedMapPin) {
         setSelectedMapPin(data[0]);
@@ -55,9 +56,9 @@ export const PropertyExplorer: React.FC = () => {
           {/* Quick Segmented Categories */}
           <div className="flex items-center gap-1 overflow-x-auto pb-1 lg:pb-0">
             {[
-              { id: 'ALL', label: 'Tous' },
-              { id: 'LONG_TERM_RENT', label: 'Location Longue Durée' },
-              { id: 'SHORT_TERM_FURNISHED', label: 'Résidences Meublées' },
+              { id: 'ALL', label: 'Toutes les maisons' },
+              { id: 'SALE', label: 'À Vendre' },
+              { id: 'LONG_TERM_RENT', label: 'À Louer' },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -192,7 +193,7 @@ export const PropertyExplorer: React.FC = () => {
                     </button>
 
                     <div className="absolute bottom-3 left-3 px-2 py-0.5 rounded bg-emerald-950/80 text-amber-300 text-[10px] font-bold tracking-wider uppercase backdrop-blur-md">
-                      {prop.category === 'LONG_TERM_RENT' ? 'Location Longue Durée' : 'Résidence Meublée'}
+                      {prop.category === 'SALE' ? 'Vente' : 'Location'}
                     </div>
                   </div>
 
@@ -206,7 +207,9 @@ export const PropertyExplorer: React.FC = () => {
                         <span aria-hidden="true">·</span>
                         <span>{prop.neighborhood}</span>
                         <span aria-hidden="true">·</span>
-                        <span className="font-semibold text-emerald-800">{prop.furnishing === 'FULLY_FURNISHED' ? 'Meublé Standing' : 'Bail Conforme'}</span>
+                        <span className="font-semibold text-emerald-800">
+                          {prop.category === 'SALE' ? 'Vente Ferme' : 'Location Vérifiée'}
+                        </span>
                       </div>
 
                       <h3 className="text-base font-bold text-emerald-950 font-serif leading-snug">
@@ -247,27 +250,39 @@ export const PropertyExplorer: React.FC = () => {
                     {/* Price and CTA */}
                     <div className="flex items-center justify-between pt-1">
                       <div>
-                        <span className="text-[10px] text-slate-400 block uppercase font-bold">Tarification</span>
+                        <span className="text-[10px] text-slate-400 block uppercase font-bold">
+                          {prop.category === 'SALE' ? 'Prix de Vente' : 'Tarification'}
+                        </span>
                         <span className="text-base font-black font-mono text-emerald-900 tabular-nums">
                           {formatFcfa(prop.priceFcfa)}
-                          {prop.category === 'LONG_TERM_RENT' ? (
+                          {prop.category === 'LONG_TERM_RENT' && (
                             <span className="text-xs font-normal text-slate-500"> / mois</span>
-                          ) : (
-                            <span className="text-xs font-normal text-slate-500"> / nuit</span>
                           )}
                         </span>
                       </div>
 
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedPropertyId(prop.id);
-                          openVisitModal();
-                        }}
-                        className="px-3.5 py-1.5 rounded-lg bg-emerald-900 hover:bg-emerald-800 text-white text-xs font-semibold shadow-sm transition-colors cursor-pointer"
-                      >
-                        Visiter
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={`tel:+${VFC_WHATSAPP_NUMBER}`}
+                          onClick={(e) => e.stopPropagation()}
+                          title={`Appeler l'agence : ${VFC_WHATSAPP_DISPLAY}`}
+                          aria-label={`Appeler l'agence ${VFC_WHATSAPP_DISPLAY}`}
+                          className="p-1.5 rounded-lg border border-emerald-200 text-emerald-800 hover:bg-emerald-50 transition-colors"
+                        >
+                          <Phone className="w-3.5 h-3.5" />
+                        </a>
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedPropertyId(prop.id);
+                            openVisitModal();
+                          }}
+                          className="px-3.5 py-1.5 rounded-lg bg-emerald-900 hover:bg-emerald-800 text-white text-xs font-semibold shadow-sm transition-colors cursor-pointer"
+                        >
+                          Visiter
+                        </button>
+                      </div>
                     </div>
 
                   </div>

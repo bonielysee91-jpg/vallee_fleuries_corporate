@@ -77,7 +77,7 @@ export const TabletDrawer: React.FC = () => {
               </div>
               <div className="overflow-hidden">
                 <div className="text-sm font-bold text-white truncate">{currentUser.fullName}</div>
-                <div className="text-xs text-amber-300/80 font-medium">{currentUser.role === 'OWNER' ? 'Bailleur Vérifié' : 'Locataire'}</div>
+                <div className="text-xs text-amber-300/80 font-medium">{currentUser.role === 'OWNER' ? 'Propriétaire Vérifié' : 'Locataire'}</div>
               </div>
             </div>
           ) : (
@@ -115,7 +115,15 @@ export const TabletDrawer: React.FC = () => {
             }`}
           >
             <Search className="w-5 h-5 text-emerald-400" />
-            <span>Explorer toutes les locations</span>
+            <span>Explorer tous les biens</span>
+          </button>
+
+          <button
+            onClick={() => navigateTo('properties', () => setFilters({ category: 'SALE' }))}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-slate-200 hover:bg-white/10 transition-colors"
+          >
+            <Sparkles className="w-5 h-5 text-amber-400" />
+            <span>Maisons à Vendre</span>
           </button>
 
           <button
@@ -123,15 +131,7 @@ export const TabletDrawer: React.FC = () => {
             className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-slate-200 hover:bg-white/10 transition-colors"
           >
             <Building2 className="w-5 h-5 text-emerald-400" />
-            <span>Location Longue Durée (1 an+)</span>
-          </button>
-
-          <button
-            onClick={() => navigateTo('properties', () => setFilters({ category: 'SHORT_TERM_FURNISHED' }))}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-slate-200 hover:bg-white/10 transition-colors"
-          >
-            <Sparkles className="w-5 h-5 text-amber-400" />
-            <span>Résidences Meublées (Séjours courts)</span>
+            <span>Maisons à Louer (Location Longue Durée)</span>
           </button>
 
           <button
@@ -169,7 +169,7 @@ export const TabletDrawer: React.FC = () => {
               }`}
             >
               <User className="w-5 h-5 text-amber-400" />
-              <span>Espace Propriétaire / Bailleur</span>
+              <span>Espace Propriétaire</span>
             </button>
           )}
 

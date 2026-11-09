@@ -10,7 +10,7 @@ export const FeaturedListingsSection: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.getProperties().then((data) => {
+    api.getProperties({ available: true }).then((data) => {
       setProperties(data.slice(0, 4));
       setLoading(false);
     });
@@ -77,7 +77,7 @@ export const FeaturedListingsSection: React.FC = () => {
                   {/* Top Floating Controls */}
                   <div className="absolute top-3 left-3 right-3 flex items-center justify-between">
                     <span className="px-2.5 py-1 rounded-md bg-emerald-950/80 text-amber-300 text-[10px] font-bold tracking-wider uppercase backdrop-blur-md border border-white/10">
-                      {prop.category === 'LONG_TERM_RENT' ? 'Location Longue Durée' : 'Résidence Meublée Prestige'}
+                      {prop.category === 'SALE' ? 'Vente' : 'Location Longue Durée'}
                     </span>
 
                     <button
@@ -95,12 +95,12 @@ export const FeaturedListingsSection: React.FC = () => {
                   <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-white text-[11px]">
                     <div className="flex items-center gap-1.5 font-semibold text-emerald-300">
                       <Shield className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Bail Conforme CI</span>
+                      <span>{prop.category === 'SALE' ? 'Acte Authentifié CI' : 'Location Vérifiée CI'}</span>
                     </div>
 
                     <div className="font-mono text-xs font-bold text-amber-300 bg-black/50 px-2 py-0.5 rounded backdrop-blur-sm">
                       {formatFcfa(prop.priceFcfa)}
-                      {prop.category === 'LONG_TERM_RENT' ? '/mois' : '/nuit'}
+                      {prop.category === 'LONG_TERM_RENT' ? '/mois' : ''}
                     </div>
                   </div>
                 </div>

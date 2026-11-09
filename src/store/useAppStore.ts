@@ -9,7 +9,7 @@ interface Notification {
   message: string;
 }
 
-export type AppView = 'home' | 'properties' | 'property-detail' | 'estimator' | 'dashboard' | 'admin' | 'favorites' | 'messages' | 'profile';
+export type AppView = 'home' | 'properties' | 'property-detail' | 'estimator' | 'dashboard' | 'admin' | 'favorites' | 'messages' | 'profile' | 'architecture';
 
 interface AppState {
   currentView: AppView;
@@ -32,10 +32,22 @@ interface AppState {
   isPaymentModalOpen: boolean;
   isVirtualTourOpen: boolean;
   isQuittanceModalOpen: boolean;
+  /**
+   * Jeton incrémenté après chaque création de visite : les écrans qui listent les
+   * rendez-vous s'y abonnent pour recharger leur liste depuis Neon.
+   */
+  visitsRefreshToken: number;
   activePaymentDetails: {
     amountFcfa: number;
     purpose: string;
     propertyTitle?: string;
+    /**
+     * Rattachement contractuel transmis à la transaction : c'est lui qui, à l'encaissement
+     * confirmé par l'opérateur, active le bail / la réservation et sort le bien du marché.
+     */
+    propertyId?: string;
+    bookingId?: string;
+    leaseId?: string;
     onSuccessCallback?: () => void;
   } | null;
 
@@ -64,7 +76,16 @@ interface AppState {
   // Modals actions
   openVisitModal: () => void;
   closeVisitModal: () => void;
-  openPaymentModal: (details: { amountFcfa: number; purpose: string; propertyTitle?: string; onSuccessCallback?: () => void }) => void;
+  requestVisitsRefresh: () => void;
+  openPaymentModal: (details: {
+    amountFcfa: number;
+    purpose: string;
+    propertyTitle?: string;
+    propertyId?: string;
+    bookingId?: string;
+    leaseId?: string;
+    onSuccessCallback?: () => void;
+  }) => void;
   closePaymentModal: () => void;
   openVirtualTour: () => void;
   closeVirtualTour: () => void;
@@ -104,6 +125,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   isPaymentModalOpen: false,
   isVirtualTourOpen: false,
   isQuittanceModalOpen: false,
+  visitsRefreshToken: 0,
   activePaymentDetails: null,
 
   setView: (view, propertyId) => {
@@ -124,8 +146,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
     const derived =
-      pathname === '/' ? 'home'
-        : pathname.startsWith('/properties') ? 'properties'
+      pathname === '/' || pathname.startsWith('/accueil') ? 'home'
+        : pathname.startsWith('/properties') || pathname.startsWith('/nos-biens') ? 'properties'
         : pathname.startsWith('/estimator') ? 'estimator'
         : pathname.startsWith('/dashboard') ? 'dashboard'
         : pathname.startsWith('/admin') ? 'admin'
@@ -213,6 +235,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   openVisitModal: () => set({ isVisitModalOpen: true }),
   closeVisitModal: () => set({ isVisitModalOpen: false }),
+  requestVisitsRefresh: () => set((state) => ({ visitsRefreshToken: state.visitsRefreshToken + 1 })),
 
   openPaymentModal: (details) => set({
     isPaymentModalOpen: true,
