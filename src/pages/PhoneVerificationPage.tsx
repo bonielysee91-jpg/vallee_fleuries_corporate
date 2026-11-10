@@ -41,10 +41,25 @@ export const PhoneVerificationPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Décompte anti-spam (en secondes) avant de pouvoir redemander un code.
+  // Il démarre à 60 s car un premier code vient d'être envoyé à l'inscription.
+  const [cooldown, setCooldown] = useState(60);
 
   useEffect(() => {
     if (incoming.devOtpCode) setDevOtpHint(incoming.devOtpCode);
   }, [incoming.devOtpCode]);
+
+  const isCoolingDown = cooldown > 0;
+
+  // Tick du décompte : décrémente chaque seconde jusqu'à zéro, puis réactive le bouton.
+  useEffect(() => {
+    if (!isCoolingDown) return;
+    const timerId = setInterval(
+      () => setCooldown((remaining) => (remaining > 0 ? remaining - 1 : 0)),
+      1000
+    );
+    return () => clearInterval(timerId);
+  }, [isCoolingDown]);
 
   // Déjà connecté : aucun besoin de repasser par la vérification.
   if (!isInitializing && isAuthenticated && currentUser) {
@@ -87,12 +102,15 @@ export const PhoneVerificationPage: React.FC = () => {
   };
 
   const handleResend = async () => {
+    if (isCoolingDown) return;
     setErrorMessage(null);
     setResending(true);
     try {
       const res = await api.resendRegistrationCode(phoneNumber);
       if (res.devOtpCode) setDevOtpHint(res.devOtpCode);
       addNotification(`Nouveau code envoyé au ${phoneNumber}`, 'info');
+      // Anti-spam : bloque le renvoi pendant 60 s après un envoi réussi.
+      setCooldown(60);
     } catch (err: any) {
       setErrorMessage(err?.message || "Renvoi du code impossible");
     } finally {
@@ -184,8 +202,8 @@ export const PhoneVerificationPage: React.FC = () => {
             <button
               type="button"
               onClick={handleResend}
-              disabled={resending}
-              className="mt-4 w-full flex items-center justify-center gap-1.5 text-[11px] font-semibold text-emerald-100/70 hover:text-white transition-colors disabled:opacity-60"
+              disabled={resending || isCoolingDown}
+              className="mt-4 w-full flex items-center justify-center gap-1.5 text-[11px] font-semibold text-emerald-100/70 hover:text-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {resending ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -193,6 +211,7 @@ export const PhoneVerificationPage: React.FC = () => {
                 <RotateCw className="w-3.5 h-3.5" />
               )}
               Renvoyer un nouveau code
+              {isCoolingDown && <span className="tabular-nums">(Attendez {cooldown}s)</span>}
             </button>
 
             <p className="mt-4 flex items-center gap-1.5 text-[11px] text-emerald-100/60">
