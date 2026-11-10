@@ -567,6 +567,8 @@ class PrismaRepository {
     if (data.commune !== undefined) patch.commune = data.commune;
     if (data.neighborhood !== undefined) patch.neighborhood = data.neighborhood;
     if (data.address !== undefined) patch.address = data.address;
+    if (data.latitude !== undefined) patch.latitude = Number(data.latitude);
+    if (data.longitude !== undefined) patch.longitude = Number(data.longitude);
     if (data.surfaceM2 !== undefined) patch.surfaceM2 = Number(data.surfaceM2);
     if (data.bedrooms !== undefined) patch.bedrooms = Number(data.bedrooms);
     if (data.bathrooms !== undefined) patch.bathrooms = Number(data.bathrooms);
@@ -575,6 +577,21 @@ class PrismaRepository {
     if (data.hasSecurity247 !== undefined) patch.hasSecurity247 = Boolean(data.hasSecurity247);
     if (data.hasSwimmingPool !== undefined) patch.hasSwimmingPool = Boolean(data.hasSwimmingPool);
     if (data.hasFiberInternet !== undefined) patch.hasFiberInternet = Boolean(data.hasFiberInternet);
+
+    // Galerie photo : l'enregistrement remplace intégralement la collection (ordre + couverture).
+    if (data.images !== undefined) {
+      patch.images = {
+        deleteMany: {},
+        create: (data.images ?? [])
+          .filter((image) => Boolean(image?.url))
+          .map((image, index) => ({
+            url: image.url,
+            caption: image.caption ?? null,
+            isCover: Boolean(image.isCover) || index === 0,
+            displayOrder: index,
+          })),
+      };
+    }
 
     const updated = await prisma.property.update({
       where: { id: existing.id },

@@ -12,14 +12,12 @@ import {
   ArrowRight,
   ShieldCheck,
   Loader2,
-  Sparkles,
   AlertTriangle,
   RotateCw
 } from 'lucide-react';
 
 interface VerificationState {
   phoneNumber?: string;
-  devOtpCode?: string;
 }
 
 /**
@@ -37,17 +35,12 @@ export const PhoneVerificationPage: React.FC = () => {
   const phoneNumber = incoming.phoneNumber ?? '';
 
   const [code, setCode] = useState('');
-  const [devOtpHint, setDevOtpHint] = useState<string | null>(incoming.devOtpCode ?? null);
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   // Décompte anti-spam (en secondes) avant de pouvoir redemander un code.
   // Il démarre à 60 s car un premier code vient d'être envoyé à l'inscription.
   const [cooldown, setCooldown] = useState(60);
-
-  useEffect(() => {
-    if (incoming.devOtpCode) setDevOtpHint(incoming.devOtpCode);
-  }, [incoming.devOtpCode]);
 
   const isCoolingDown = cooldown > 0;
 
@@ -106,8 +99,7 @@ export const PhoneVerificationPage: React.FC = () => {
     setErrorMessage(null);
     setResending(true);
     try {
-      const res = await api.resendRegistrationCode(phoneNumber);
-      if (res.devOtpCode) setDevOtpHint(res.devOtpCode);
+      await api.resendRegistrationCode(phoneNumber);
       addNotification(`Nouveau code envoyé au ${phoneNumber}`, 'info');
       // Anti-spam : bloque le renvoi pendant 60 s après un envoi réussi.
       setCooldown(60);
@@ -174,13 +166,6 @@ export const PhoneVerificationPage: React.FC = () => {
                     className={`${inputClass} tracking-[0.4em] font-bold`}
                   />
                 </div>
-
-                {devOtpHint && (
-                  <p className="mt-2 flex items-center gap-1.5 text-[11px] text-amber-300/90">
-                    <Sparkles className="w-3.5 h-3.5" />
-                    Environnement de test — code : <strong>{devOtpHint}</strong>
-                  </p>
-                )}
               </div>
 
               <button

@@ -63,8 +63,11 @@ const PORT = Number(process.env.PORT) || 3000;
 
 // The raw body must survive JSON parsing: the Mobile Money webhook authenticity
 // is proven by an HMAC signature computed over the exact bytes the gateway sent.
+// Limite relevée : les annonces embarquent leur galerie photo en data URL (base64),
+// bien au-delà du plafond par défaut de 100 ko.
 app.use(
   express.json({
+    limit: '25mb',
     verify: (req, _res, buf) => {
       (req as Request & { rawBody?: Buffer }).rawBody = buf;
     },
@@ -491,10 +494,11 @@ app.get('/api/system/architecture', async (_req, res) => {
 
 /**
  * Émet un code SMS d'inscription et tente l'envoi réel dès qu'une passerelle est
- * configurée. Le code en clair n'est renvoyé qu'hors production (test sans SMS).
+ * configurée. Le code n'est JAMAIS renvoyé au navigateur : sans passerelle il n'est
+ * journalisé qu'hors production (console serveur) pour rester testable en local.
  * Lève `SMS_NOT_CONFIGURED` en production si aucune passerelle n'est disponible.
  */
-async function deliverRegistrationCode(phoneNumber: string): Promise<string | undefined> {
+async function deliverRegistrationCode(phoneNumber: string): Promise<void> {
   const { code } = await issueOtp(phoneNumber, 'REGISTER');
   if (isSmsConfigured()) {
     await sendSms(
@@ -503,8 +507,9 @@ async function deliverRegistrationCode(phoneNumber: string): Promise<string | un
     );
   } else if (isProduction) {
     throw new Error('SMS_NOT_CONFIGURED');
+  } else {
+    console.log(`[OTP REGISTER] Code pour ${phoneNumber} : ${code}`);
   }
-  return isProduction ? undefined : code;
 }
 
 // A. Registration — always hashes the password before it touches Neon.
@@ -554,7 +559,7 @@ app.post('/api/auth/register', async (req, res) => {
       phoneVerified: false,
     });
 
-    const devOtpCode = await deliverRegistrationCode(cleanPhone);
+    await deliverRegistrationCode(cleanPhone);
 
     await writeAuditLog({
       userId: user.id,
@@ -570,8 +575,6 @@ app.post('/api/auth/register', async (req, res) => {
       message: `Compte créé. Un code de validation a été envoyé par SMS au ${cleanPhone}.`,
       requiresVerification: true,
       phoneNumber: cleanPhone,
-      // Renvoyé uniquement hors production pour rester testable sans passerelle SMS.
-      ...(devOtpCode ? { devOtpCode } : {}),
     });
   } catch (error: any) {
     console.error('[Register]', error);
@@ -664,11 +667,10 @@ app.post('/api/auth/register/resend', async (req, res) => {
       });
     }
 
-    const devOtpCode = await deliverRegistrationCode(cleanPhone);
+    await deliverRegistrationCode(cleanPhone);
     res.json({
       success: true,
       message: `Nouveau code de validation envoyé au ${cleanPhone}.`,
-      ...(devOtpCode ? { devOtpCode } : {}),
     });
   } catch (error: any) {
     console.error('[Register Resend]', error);
@@ -800,14 +802,16 @@ app.post('/api/auth/otp/send', async (req, res) => {
         success: false,
         error: 'Passerelle SMS non configurée : aucun code ne peut être délivré pour le moment.',
       });
+    } else {
+      // Sans passerelle, le code n'est jamais renvoyé au navigateur : il reste
+      // consultable dans la console serveur pour les tests en local.
+      console.log(`[OTP SEND] Code pour ${cleanPhone} : ${code}`);
     }
 
     res.json({
       success: true,
       message: `Code de sécurité envoyé par SMS au ${cleanPhone}`,
       expiresAt,
-      // Returned only outside production so the flow stays testable without an SMS gateway.
-      ...(isProduction ? {} : { devOtpCode: code }),
     });
   } catch (error: any) {
     console.error('[OTP Send]', error);
@@ -1459,8 +1463,6 @@ app.post('/api/payments/confirm-code', authenticateJWT, async (req, res) => {
       codeRequired: true,
       message: `Code de validation envoyé par SMS au ${phone}`,
       expiresAt,
-      // Renvoyé hors production uniquement, pour rester testable sans passerelle SMS.
-      ...(isProduction ? {} : { devOtpCode: code }),
     });
   } catch (error: any) {
     console.error('[Payment OTP Send]', error);
@@ -2143,6 +2145,49 @@ app.patch('/api/admin/properties/:id/status', authenticateJWT, requireRole(['ADM
     res.status(400).json({ success: false, error: error.message });
   }
 });
+
+/**
+ * Registre complet des biens pour le Command Center : contrairement à la file de
+ * modération, cette vue renvoie **toutes** les annonces, quel que soit leur statut.
+ */
+app.get('/api/admin/properties', authenticateJWT, requireRole(['ADMIN']), async (_req, res) => {
+  try {
+    const properties = await db.getProperties();
+    res.json({ success: true, count: properties.length, data: properties });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * Réinitialisation d'un bien : le renvoie dans la file de modération
+ * (`PENDING_REVIEW`). Action **non destructive** — aucune donnée n'est effacée,
+ * le bien disparaît simplement du catalogue public jusqu'à revalidation.
+ */
+app.post(
+  '/api/admin/properties/:id/reset',
+  authenticateJWT,
+  requireRole(['ADMIN']),
+  async (req, res) => {
+    try {
+      const updated = await db.updatePropertyStatus(req.params.id, 'PENDING_REVIEW');
+      if (!updated) {
+        return res.status(404).json({ success: false, error: 'Propriété non trouvée' });
+      }
+      await writeAuditLog({
+        userId: (req as AuthedRequest).user!.userId,
+        action: 'PROPERTY_RESET',
+        entity: 'PROPERTY',
+        entityId: updated.id,
+        ipAddress: sessionMeta(req).ipAddress,
+        details: { status: 'PENDING_REVIEW' },
+      });
+      res.json({ success: true, data: updated });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: error.message });
+    }
+  }
+);
 
 /** Mobile Money ledger with the VFC commission split already applied. */
 app.get('/api/admin/transactions', authenticateJWT, requireRole(['ADMIN']), async (req, res) => {

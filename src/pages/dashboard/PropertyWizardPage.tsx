@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAppStore } from '../../store/useAppStore.ts';
 import { api, formatFcfa } from '../../services/api.ts';
-import { FurnishingStatus, PropertyType, RentalCategory } from '../../types/index.ts';
+import { City, FurnishingStatus, PropertyImage, PropertyType, RentalCategory } from '../../types/index.ts';
 import {
   ALLOWED_PROPERTY_TYPES,
   PROPERTY_TYPE_LABELS,
@@ -13,12 +13,14 @@ import {
   ArrowRight,
   Building2,
   CheckCircle2,
+  ImagePlus,
   Loader2,
   MapPin,
   Ruler,
   Save,
   Sparkles,
-  Send
+  Send,
+  Trash2
 } from 'lucide-react';
 
 // Natures d'offre autorisées : Vente & Location uniquement (cf. référentiel des biens).
@@ -27,13 +29,43 @@ const CATEGORIES: { id: RentalCategory; label: string; hint: string }[] = [
   { id: 'LONG_TERM_RENT', label: TRANSACTION_TYPE_LABELS.LONG_TERM_RENT, hint: 'Location d\'un an et plus' }
 ];
 
+/**
+ * Convertit un fichier image local en data URL redimensionnée (max 1600 px de large,
+ * JPEG qualité 0,78). Sans redimensionnement, une photo de téléphone pèserait plusieurs
+ * mégaoctets dans l'annonce ; ici le poids reste raisonnable pour le catalogue.
+ */
+function fileToResizedDataUrl(file: File, maxWidth = 1600, quality = 0.78): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`Lecture de « ${file.name} » impossible`));
+    reader.onload = () => {
+      const image = new Image();
+      image.onerror = () => reject(new Error(`Image « ${file.name} » illisible`));
+      image.onload = () => {
+        const scale = Math.min(1, maxWidth / image.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(image.width * scale));
+        canvas.height = Math.max(1, Math.round(image.height * scale));
+        const context = canvas.getContext('2d');
+        if (!context) {
+          reject(new Error('Traitement des images indisponible sur ce navigateur'));
+          return;
+        }
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      image.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 const TYPES: PropertyType[] = ALLOWED_PROPERTY_TYPES;
 const FURNISHINGS: { id: FurnishingStatus; label: string }[] = [
   { id: 'UNFURNISHED', label: 'Non équipé' },
   { id: 'SEMI_FURNISHED', label: 'Partiellement équipé' },
   { id: 'FULLY_FURNISHED', label: 'Entièrement équipé' }
 ];
-const COMMUNES = ['Cocody', 'Marcory', 'Yopougon', 'Plateau', 'Riviera'];
 
 /** `/dashboard/properties/new` (création) & `/dashboard/properties/:id/edit` (édition) — wizard multi-étapes. */
 export const PropertyWizardPage: React.FC = () => {
@@ -45,6 +77,9 @@ export const PropertyWizardPage: React.FC = () => {
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [loadingExisting, setLoadingExisting] = useState(isEdit);
+  const [processingImages, setProcessingImages] = useState(false);
+  // Référentiel géographique ivoirien servi par Neon : aucune ville n'est codée en dur.
+  const [cities, setCities] = useState<City[]>([]);
 
   const [form, setForm] = useState({
     category: 'LONG_TERM_RENT' as RentalCategory,
@@ -52,9 +87,13 @@ export const PropertyWizardPage: React.FC = () => {
     furnishing: 'FULLY_FURNISHED' as FurnishingStatus,
     title: '',
     description: '',
+    city: 'Abidjan',
     commune: 'Cocody',
     neighborhood: '',
     address: '',
+    latitude: 5.3485,
+    longitude: -3.9723,
+    images: [] as PropertyImage[],
     surfaceM2: 85,
     bedrooms: 2,
     bathrooms: 2,
@@ -70,6 +109,54 @@ export const PropertyWizardPage: React.FC = () => {
 
   const update = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
+
+  // Charge toutes les villes de Côte d'Ivoire (puis leurs communes/quartiers) au montage.
+  useEffect(() => {
+    let active = true;
+    api
+      .getGeography()
+      .then((rows) => {
+        if (!active) return;
+        setCities(rows);
+        // Aligne la sélection sur le référentiel (utile en édition si la ville a changé).
+        setForm((prev) => {
+          const current = rows.find((city) => city.name === prev.city) ?? rows[0];
+          if (!current) return prev;
+          const communes = current.communes ?? [];
+          const commune = communes.some((item) => item.name === prev.commune)
+            ? prev.commune
+            : communes[0]?.name ?? '';
+          return { ...prev, city: current.name, commune };
+        });
+      })
+      .catch(() => setCities([]));
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const selectedCity = cities.find((city) => city.name === form.city);
+  const communeOptions = selectedCity?.communes ?? [];
+  const neighborhoodOptions =
+    communeOptions.find((commune) => commune.name === form.commune)?.neighborhoods ?? [];
+
+  /** Changer de ville recentre la commune, le quartier et les coordonnées GPS sur la nouvelle ville. */
+  const handleCityChange = (name: string) => {
+    const city = cities.find((item) => item.name === name);
+    setForm((prev) => ({
+      ...prev,
+      city: name,
+      commune: city?.communes?.[0]?.name ?? '',
+      neighborhood: '',
+      latitude: city?.latitude ?? prev.latitude,
+      longitude: city?.longitude ?? prev.longitude
+    }));
+  };
+
+  /** Changer de commune vide le quartier (chaque commune a ses propres quartiers). */
+  const handleCommuneChange = (name: string) => {
+    setForm((prev) => ({ ...prev, commune: name, neighborhood: '' }));
+  };
 
   // Mode édition : on charge le bien existant puis on préremplit l'assistant.
   useEffect(() => {
@@ -91,9 +178,13 @@ export const PropertyWizardPage: React.FC = () => {
           furnishing: property.furnishing,
           title: property.title,
           description: property.description,
+          city: property.city,
           commune: property.commune,
           neighborhood: property.neighborhood,
           address: property.address,
+          latitude: property.latitude,
+          longitude: property.longitude,
+          images: property.images ?? [],
           surfaceM2: property.surfaceM2,
           bedrooms: property.bedrooms,
           bathrooms: property.bathrooms,
@@ -119,7 +210,60 @@ export const PropertyWizardPage: React.FC = () => {
     };
   }, [id, addNotification, navigate]);
 
-  const steps = ['Produit', 'Localisation', 'Caractéristiques', 'Récapitulatif'];
+  const steps = ['Produit', 'Localisation', 'Caractéristiques', 'Photos', 'Récapitulatif'];
+
+  // ---- Gestion de la galerie photo (import local → data URL) ----
+  const handleFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setProcessingImages(true);
+    try {
+      const drafted: PropertyImage[] = [];
+      for (const file of Array.from(files)) {
+        if (!file.type.startsWith('image/')) continue;
+        if (file.size > 8 * 1024 * 1024) {
+          addNotification(`« ${file.name} » dépasse 8 Mo et a été ignorée`, 'warning');
+          continue;
+        }
+        const url = await fileToResizedDataUrl(file);
+        drafted.push({
+          id: crypto.randomUUID(),
+          url,
+          caption: file.name.replace(/\.[^.]+$/, ''),
+          isCover: false
+        });
+      }
+      if (drafted.length === 0) return;
+      setForm((prev) => {
+        const images = [...prev.images, ...drafted];
+        // Aucune couverture encore définie : la première photo du lot prend le rôle.
+        return images.some((image) => image.isCover)
+          ? { ...prev, images }
+          : { ...prev, images: images.map((image, index) => ({ ...image, isCover: index === 0 })) };
+      });
+    } catch (err: any) {
+      addNotification(err?.message || 'Ajout des images impossible', 'error');
+    } finally {
+      setProcessingImages(false);
+    }
+  };
+
+  const removeImage = (index: number) => {
+    setForm((prev) => {
+      const images = prev.images.filter((_, position) => position !== index);
+      // Supprimer la couverture promeut la première photo restante.
+      if (images.length > 0 && !images.some((image) => image.isCover)) {
+        images[0] = { ...images[0], isCover: true };
+      }
+      return { ...prev, images };
+    });
+  };
+
+  const setCover = (index: number) => {
+    setForm((prev) => ({
+      ...prev,
+      images: prev.images.map((image, position) => ({ ...image, isCover: position === index }))
+    }));
+  };
 
   const handleSubmit = async () => {
     if (!form.title.trim()) {
@@ -127,12 +271,18 @@ export const PropertyWizardPage: React.FC = () => {
       setStep(1);
       return;
     }
+    if (form.images.length === 0) {
+      addNotification('Ajoutez au moins une photo du bien', 'warning');
+      setStep(4);
+      return;
+    }
 
     setSubmitting(true);
     try {
       const payload = {
         ...form,
-        city: 'Abidjan',
+        latitude: Number(form.latitude),
+        longitude: Number(form.longitude),
         priceFcfa: Number(form.priceFcfa),
         depositMonths: 2,
         advanceMonths: 2,
@@ -288,31 +438,52 @@ export const PropertyWizardPage: React.FC = () => {
           <div className="space-y-4">
             <div className="grid sm:grid-cols-2 gap-4">
               <div>
-                <label className={labelClass}>Commune d'Abidjan</label>
+                <label className={labelClass}>Ville</label>
                 <select
-                  value={form.commune}
-                  onChange={(e) => update('commune', e.target.value)}
+                  value={form.city}
+                  onChange={(e) => handleCityChange(e.target.value)}
                   className={inputClass}
                 >
-                  {(COMMUNES.includes(form.commune)
-                    ? COMMUNES
-                    : [form.commune, ...COMMUNES]
-                  ).map((commune) => (
-                    <option key={commune} value={commune}>
-                      {commune}
+                  {(cities.length > 0 ? cities.map((city) => city.name) : [form.city]).map((name) => (
+                    <option key={name} value={name}>
+                      {name}
                     </option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className={labelClass}>Quartier</label>
-                <input
-                  value={form.neighborhood}
-                  onChange={(e) => update('neighborhood', e.target.value)}
-                  placeholder="Ex : Riviera Golf"
+                <label className={labelClass}>Commune</label>
+                <select
+                  value={form.commune}
+                  onChange={(e) => handleCommuneChange(e.target.value)}
                   className={inputClass}
-                />
+                  disabled={communeOptions.length === 0}
+                >
+                  {(communeOptions.length > 0 ? communeOptions.map((commune) => commune.name) : [form.commune])
+                    .filter(Boolean)
+                    .map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                </select>
               </div>
+            </div>
+
+            <div>
+              <label className={labelClass}>Quartier</label>
+              <input
+                list="wizard-neighborhoods"
+                value={form.neighborhood}
+                onChange={(e) => update('neighborhood', e.target.value)}
+                placeholder="Ex : Riviera Golf"
+                className={inputClass}
+              />
+              <datalist id="wizard-neighborhoods">
+                {neighborhoodOptions.map((neighborhood) => (
+                  <option key={neighborhood} value={neighborhood} />
+                ))}
+              </datalist>
             </div>
 
             <div>
@@ -327,6 +498,36 @@ export const PropertyWizardPage: React.FC = () => {
                 />
               </div>
             </div>
+
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label className={labelClass}>Latitude (GPS)</label>
+                <input
+                  type="number"
+                  step="0.000001"
+                  value={form.latitude}
+                  onChange={(e) => update('latitude', Number(e.target.value))}
+                  placeholder="5.348500"
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className={labelClass}>Longitude (GPS)</label>
+                <input
+                  type="number"
+                  step="0.000001"
+                  value={form.longitude}
+                  onChange={(e) => update('longitude', Number(e.target.value))}
+                  placeholder="-3.972300"
+                  className={inputClass}
+                />
+              </div>
+            </div>
+
+            <p className="text-[11px] text-slate-500 flex items-center gap-1.5">
+              <MapPin className="w-3.5 h-3.5 text-emerald-700" />
+              Les coordonnées (latitude / longitude) positionnent le bien sur la carte du catalogue.
+            </p>
 
             <p className="text-[11px] text-slate-500 flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-amber-500" />
@@ -433,16 +634,114 @@ export const PropertyWizardPage: React.FC = () => {
         )}
 
         {step === 4 && (
+          <div className="space-y-5">
+            <div>
+              <label className={labelClass}>Photos du bien</label>
+              <label className="flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-300 px-4 py-8 text-center cursor-pointer hover:border-emerald-400 hover:bg-emerald-50/50 transition-colors">
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    void handleFiles(e.target.files);
+                    e.target.value = '';
+                  }}
+                />
+                {processingImages ? (
+                  <Loader2 className="w-6 h-6 animate-spin text-emerald-700" />
+                ) : (
+                  <ImagePlus className="w-6 h-6 text-emerald-700" />
+                )}
+                <span className="text-xs font-bold text-slate-700">
+                  {processingImages ? 'Traitement des images…' : "Ajouter des photos depuis l'ordinateur"}
+                </span>
+                <span className="text-[10px] text-slate-500">
+                  JPG, PNG ou WEBP · plusieurs fichiers possibles (8 Mo max par photo)
+                </span>
+              </label>
+            </div>
+
+            {form.images.length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {form.images.map((image, index) => (
+                  <div
+                    key={image.id}
+                    className="relative rounded-2xl overflow-hidden border border-slate-200 group"
+                  >
+                    <img
+                      src={image.url}
+                      alt={image.caption || `Photo ${index + 1}`}
+                      className="w-full h-28 object-cover"
+                    />
+                    {image.isCover && (
+                      <span className="absolute top-1.5 left-1.5 rounded-full bg-amber-400 text-emerald-950 text-[9px] font-black px-2 py-0.5 uppercase tracking-wide">
+                        Couverture
+                      </span>
+                    )}
+                    <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-emerald-950/75 px-2 py-1.5">
+                      {!image.isCover && (
+                        <button
+                          type="button"
+                          onClick={() => setCover(index)}
+                          className="text-[10px] font-bold text-amber-300 hover:text-white transition-colors"
+                        >
+                          Définir en couverture
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => removeImage(index)}
+                        aria-label="Supprimer la photo"
+                        className="ml-auto text-white/80 hover:text-red-300 transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <p className="text-[11px] text-slate-500 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+              La première photo (couverture) sert de visuel principal sur le catalogue.
+            </p>
+          </div>
+        )}
+
+        {step === 5 && (
           <div className="space-y-4">
             <h2 className="font-serif text-lg font-bold text-slate-900">Récapitulatif de l'annonce</h2>
+            {form.images.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {form.images.slice(0, 6).map((image) => (
+                  <img
+                    key={image.id}
+                    src={image.url}
+                    alt={image.caption || 'Photo du bien'}
+                    className={`h-16 w-20 rounded-xl object-cover border-2 ${
+                      image.isCover ? 'border-amber-400' : 'border-slate-200'
+                    }`}
+                  />
+                ))}
+              </div>
+            )}
             <dl className="grid sm:grid-cols-2 gap-3">
               {[
                 { label: 'Titre', value: form.title || '—' },
                 { label: 'Offre', value: form.category === 'SALE' ? 'Vente' : 'Longue durée' },
                 { label: 'Typologie', value: form.type },
                 { label: 'Équipement', value: form.furnishing },
-                { label: 'Commune', value: `${form.commune} · ${form.neighborhood || 'Abidjan'}` },
+                { label: 'Ville', value: form.city },
+                { label: 'Commune', value: form.commune || '—' },
+                { label: 'Quartier', value: form.neighborhood || '—' },
                 { label: 'Adresse', value: form.address || '—' },
+                {
+                  label: 'Coordonnées GPS',
+                  value: `${Number(form.latitude).toFixed(5)}, ${Number(form.longitude).toFixed(5)}`
+                },
+                { label: 'Photos', value: `${form.images.length} photo(s)` },
                 { label: 'Surface', value: `${form.surfaceM2} m²` },
                 { label: 'Chambres / Salles d\'eau', value: `${form.bedrooms} / ${form.bathrooms}` },
                 {

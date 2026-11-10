@@ -18,7 +18,6 @@ import {
   ArrowRight,
   ShieldCheck,
   Loader2,
-  Sparkles,
   Briefcase
 } from 'lucide-react';
 
@@ -56,7 +55,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ mode }) => {
 
   const [otpSent, setOtpSent] = useState(false);
   const [otpCode, setOtpCode] = useState('');
-  const [devOtpHint, setDevOtpHint] = useState<string | null>(null);
 
   const redirectTarget = useMemo(() => {
     const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname;
@@ -115,7 +113,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ mode }) => {
         });
         addNotification(`Code de validation envoyé au ${result.phoneNumber}`, 'info');
         navigate('/verify-phone', {
-          state: { phoneNumber: result.phoneNumber, devOtpCode: result.devOtpCode }
+          state: { phoneNumber: result.phoneNumber }
         });
         return;
       }
@@ -153,11 +151,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({ mode }) => {
 
     setLoading(true);
     try {
-      const res = await api.sendSmsOtp(phoneNumber.trim());
+      await api.sendSmsOtp(phoneNumber.trim());
       setOtpSent(true);
-      if (res.devOtpCode) {
-        setDevOtpHint(res.devOtpCode);
-      }
       addNotification(`Code de sécurité envoyé au ${phoneNumber.trim()}`, 'info');
     } catch (err: any) {
       setErrorMessage(err?.message || "Envoi du code SMS impossible");
@@ -565,13 +560,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ mode }) => {
                               className={`${inputClass} tracking-[0.4em] font-bold`}
                             />
                           </div>
-
-                          {devOtpHint && (
-                            <p className="mt-2 flex items-center gap-1.5 text-[11px] text-amber-300/90">
-                              <Sparkles className="w-3.5 h-3.5" />
-                              Environnement de test — code : <strong>{devOtpHint}</strong>
-                            </p>
-                          )}
 
                           <button
                             type="button"

@@ -127,8 +127,6 @@ export interface RegisterResult {
   message: string;
   requiresVerification: boolean;
   phoneNumber: string;
-  /** Renvoyé uniquement hors production (aucune passerelle SMS configurée). */
-  devOtpCode?: string;
 }
 
 export interface AdminUserPage {
@@ -258,11 +256,11 @@ export const api = {
   /** Renvoie un nouveau code si le compte n'est pas encore vérifié. */
   async resendRegistrationCode(
     phoneNumber: string
-  ): Promise<{ success: boolean; message: string; devOtpCode?: string }> {
+  ): Promise<{ success: boolean; message: string }> {
     return request('/auth/register/resend', { method: 'POST', body: { phoneNumber } });
   },
 
-  async sendSmsOtp(phoneNumber: string): Promise<{ success: boolean; devOtpCode?: string }> {
+  async sendSmsOtp(phoneNumber: string): Promise<{ success: boolean }> {
     return request('/auth/otp/send', { method: 'POST', body: { phoneNumber } });
   },
 
@@ -489,7 +487,7 @@ export const api = {
   // -----------------------------------------------------------
   /**
    * Envoie par SMS le code à valider AVANT toute exécution du débit.
-   * `devOtpCode` n'est renvoyé qu'hors production (test sans passerelle SMS).
+   * Le code n'est jamais renvoyé au navigateur.
    */
   async requestPaymentCode(payload: {
     phoneNumber: string;
@@ -499,7 +497,6 @@ export const api = {
     codeRequired?: boolean;
     message: string;
     expiresAt?: string;
-    devOtpCode?: string;
   }> {
     return request('/payments/confirm-code', { method: 'POST', body: payload });
   },
@@ -597,6 +594,21 @@ export const api = {
 
   async adminGetModerationQueue(): Promise<Property[]> {
     const json = await request<{ data: Property[] }>('/admin/moderation');
+    return json.data;
+  },
+
+  /** Registre complet des annonces (tous statuts) pour la gestion admin. */
+  async adminGetProperties(): Promise<Property[]> {
+    const json = await request<{ data: Property[] }>('/admin/properties');
+    return json.data ?? [];
+  },
+
+  /** Réinitialise un bien : retour en file de modération (`PENDING_REVIEW`). */
+  async adminResetProperty(id: string): Promise<Property> {
+    const json = await request<{ data: Property }>(
+      `/admin/properties/${encodeURIComponent(id)}/reset`,
+      { method: 'POST' }
+    );
     return json.data;
   },
 

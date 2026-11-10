@@ -1,8 +1,8 @@
 /**
  * Vallées Fleuries Corporate — Neon PostgreSQL Production Seed
  * Idempotent migration script that populates the live Neon cloud database with
- * the full Ivorian rental catalogue: staff accounts, amenities, the four
- * certified geography hubs (Abidjan, Yamoussoukro, Bouaké, Assinie) and the
+ * the full Ivorian rental catalogue: staff accounts, amenities, the national
+ * geography reference (57 Ivorian cities → communes → neighbourhoods) and the
  * rental-only property inventory illustrated with external HTTPS image URLs.
  *
  * Safe to re-run: every write is an upsert keyed on a unique column, and child
@@ -69,7 +69,7 @@ export async function seedDatabase() {
     update: {},
     create: {
       email: 'admin@valleesfleuries.ci',
-      phoneNumber: '+2250709887766',
+      phoneNumber: '+2250173839518',
       fullName: 'M. Jean-Philippe Brou',
       passwordHash: hashPassword(adminSeedPassword),
       role: UserRole.ADMIN,
@@ -132,8 +132,10 @@ export async function seedDatabase() {
   console.log(`[Seed] ${amenities.length} amenities registered.`);
 
   // -------------------------------------------------------------
-  // 3. CERTIFIED IVORIAN GEOGRAPHY (4 hubs → communes → neighbourhoods)
+  // 3. IVORIAN GEOGRAPHY (villes → communes → quartiers)
   // -------------------------------------------------------------
+  // Référentiel national : chefs-lieux de région et principales villes de Côte
+  // d'Ivoire. Chaque écriture est un upsert par `code`, donc rejouable sans doublon.
   const geography = [
     {
       code: 'ABIDJAN',
@@ -148,6 +150,12 @@ export async function seedDatabase() {
         { code: 'YOPOUGON', name: 'Yopougon', neighborhoods: ['Niangon', 'Sicogi', 'Toit Rouge'] },
         { code: 'PLATEAU', name: 'Plateau', neighborhoods: ['Centre Administratif', 'Cité Administrative'] },
         { code: 'RIVIERA', name: 'Riviera', neighborhoods: ['Riviera Palmeraie', 'Riviera Bonoumin', 'Riviera 3'] },
+        { code: 'TREICHVILLE', name: 'Treichville', neighborhoods: ['Zone 3', 'Arras'] },
+        { code: 'ADJAME', name: 'Adjamé', neighborhoods: ['Bracodi', 'Liberté'] },
+        { code: 'ABOBO', name: 'Abobo', neighborhoods: ['Abobo Baoulé', 'Sagbé'] },
+        { code: 'KOUMASSI', name: 'Koumassi', neighborhoods: ['Remblais', 'SICOGI'] },
+        { code: 'PORT_BOUET', name: 'Port-Bouët', neighborhoods: ['Vridi', 'Gonzagueville'] },
+        { code: 'ATTECOUBE', name: 'Attécoubé', neighborhoods: ['Locodjro', 'Agban'] },
       ],
     },
     {
@@ -172,6 +180,7 @@ export async function seedDatabase() {
       communes: [
         { code: 'BKE_AIR_FRANCE', name: 'Air France', neighborhoods: ['Air France 1', 'Air France 2'] },
         { code: 'BKE_BELLEVILLE', name: 'Belleville', neighborhoods: ['Belleville Nord', 'Koko'] },
+        { code: 'BKE_COMMERCE', name: 'Commerce', neighborhoods: ['Grand Marché', 'Centre'] },
       ],
     },
     {
@@ -184,6 +193,603 @@ export async function seedDatabase() {
       communes: [
         { code: 'ASSINIE_MAFIA', name: 'Assinie-Mafia', neighborhoods: ['Pointe Mafia', 'Canal'] },
         { code: 'ASSINIE_FRANCE', name: 'Assinie-France', neighborhoods: ['Bord de Lagune', 'Plage Est'] },
+      ],
+    },
+    {
+      code: 'SAN_PEDRO',
+      name: 'San-Pédro',
+      region: 'Bas-Sassandra',
+      description: 'Premier port cacaoyer — pôle industriel et logistique du Sud-Ouest.',
+      latitude: 4.7485,
+      longitude: -6.6363,
+      communes: [
+        { code: 'SP_BARDOT', name: 'Bardot', neighborhoods: ['Centre Commercial', 'Bardot Est'] },
+        { code: 'SP_BALMER', name: 'Balmer', neighborhoods: ['Balmer Centre', 'Cité Portuaire'] },
+        { code: 'SP_SEWEKE', name: 'Séwéké', neighborhoods: ['Séwéké Nord', 'Zone Industrielle'] },
+      ],
+    },
+    {
+      code: 'KORHOGO',
+      name: 'Korhogo',
+      region: 'Savanes',
+      description: 'Capitale du Nord — carrefour commercial et culturel sénoufo.',
+      latitude: 9.4578,
+      longitude: -5.6294,
+      communes: [
+        { code: 'KOR_SOBA', name: 'Soba', neighborhoods: ['Soba Centre', 'Koko'] },
+        { code: 'KOR_PETIT_PARIS', name: 'Petit Paris', neighborhoods: ['Petit Paris', 'Sinistré'] },
+        { code: 'KOR_COMMERCE', name: 'Commerce', neighborhoods: ['Grand Marché', 'Centre'] },
+      ],
+    },
+    {
+      code: 'DALOA',
+      name: 'Daloa',
+      region: 'Haut-Sassandra',
+      description: 'Cœur de la boucle du cacao — marché régional majeur du Centre-Ouest.',
+      latitude: 6.877,
+      longitude: -6.4502,
+      communes: [
+        { code: 'DAL_TAZIBOUO', name: 'Tazibouo', neighborhoods: ['Tazibouo 1', 'Tazibouo 2'] },
+        { code: 'DAL_LOBIA', name: 'Lobia', neighborhoods: ['Lobia Gare', 'Lobia Centre'] },
+        { code: 'DAL_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Dioulabougou'] },
+      ],
+    },
+    {
+      code: 'MAN',
+      name: 'Man',
+      region: 'Montagnes',
+      description: 'Cité des dix-huit montagnes — tourisme et paysages du Tonkpi.',
+      latitude: 7.4125,
+      longitude: -7.5537,
+      communes: [
+        { code: 'MAN_LIBREVILLE', name: 'Libreville', neighborhoods: ['Libreville Centre', 'Kennedy'] },
+        { code: 'MAN_GBAPLEU', name: 'Grand Gbapleu', neighborhoods: ['Grand Gbapleu Nord', 'Dioulabougou'] },
+        { code: 'MAN_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'GAGNOA',
+      name: 'Gagnoa',
+      region: 'Gôh',
+      description: 'Grand marché du cacao — plaque tournante du Centre-Ouest.',
+      latitude: 6.1319,
+      longitude: -5.9506,
+      communes: [
+        { code: 'GAG_DIOULABOUGOU', name: 'Dioulabougou', neighborhoods: ['Dioulabougou 1', 'Dioulabougou 2'] },
+        { code: 'GAG_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'ABENGOUROU',
+      name: 'Abengourou',
+      region: 'Indénié-Djuablin',
+      description: 'Capitale de l\'Indénié — théâtre du royaume Agni.',
+      latitude: 6.7297,
+      longitude: -3.4964,
+      communes: [
+        { code: 'ABE_AMELEKIA', name: 'Amelekia', neighborhoods: ['Amelekia Centre', 'Amelekia Nord'] },
+        { code: 'ABE_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'DIVO',
+      name: 'Divo',
+      region: 'Lôh-Djiboua',
+      description: 'Chef-lieu du Lôh-Djiboua, au cœur du pays Dida.',
+      latitude: 5.8394,
+      longitude: -5.3572,
+      communes: [
+        { code: 'DIVO_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'GRAND_BASSAM',
+      name: 'Grand-Bassam',
+      region: 'Sud-Comoé',
+      description: 'Ancienne capitale coloniale, patrimoine UNESCO et bord de mer.',
+      latitude: 5.1959,
+      longitude: -3.738,
+      communes: [
+        { code: 'GB_FRANCE', name: 'Quartier France', neighborhoods: ['Quartier France', 'Bord de Mer'] },
+        { code: 'GB_MOOSSOU', name: 'Moossou', neighborhoods: ['Moossou Centre', 'Mockeyville'] },
+        { code: 'GB_VITRE', name: 'Vitré', neighborhoods: ['Vitré 1', 'Vitré 2'] },
+      ],
+    },
+    {
+      code: 'BINGERVILLE',
+      name: 'Bingerville',
+      region: 'Lagunes',
+      description: 'Commune résidentielle et verdoyante du district d\'Abidjan.',
+      latitude: 5.3556,
+      longitude: -3.8853,
+      communes: [
+        { code: 'BIN_CENTRE', name: 'Centre', neighborhoods: ['Centre', 'Marché'] },
+        { code: 'BIN_ADJAME', name: 'Adjamé-Bingerville', neighborhoods: ['Adjamé-Bingerville', 'Anna'] },
+      ],
+    },
+    {
+      code: 'DABOU',
+      name: 'Dabou',
+      region: 'Grands-Ponts',
+      description: 'Cité lagunaire des Grands-Ponts, au bord de la lagune Ébrié.',
+      latitude: 5.3226,
+      longitude: -4.3768,
+      communes: [
+        { code: 'DAB_LOPOU', name: 'Lopou', neighborhoods: ['Lopou Centre', 'Lopou Sud'] },
+        { code: 'DAB_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'AGBOVILLE',
+      name: 'Agboville',
+      region: 'Agnéby-Tiassa',
+      description: 'Chef-lieu de l\'Agnéby-Tiassa, axe agricole Abidjan–Yamoussoukro.',
+      latitude: 5.928,
+      longitude: -4.213,
+      communes: [
+        { code: 'AGB_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'ADZOPE',
+      name: 'Adzopé',
+      region: 'La Mé',
+      description: 'Carrefour forestier du Sud-Est, riche en plantations.',
+      latitude: 6.107,
+      longitude: -3.862,
+      communes: [
+        { code: 'ADZ_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'ABOISSO',
+      name: 'Aboisso',
+      region: 'Sud-Comoé',
+      description: 'Chef-lieu du Sud-Comoé, proche des lagunes Aby.',
+      latitude: 5.4675,
+      longitude: -3.2072,
+      communes: [
+        { code: 'ABS_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'BONDOUKOU',
+      name: 'Bondoukou',
+      region: 'Gontougo',
+      description: 'Cité historique du royaume Abron, carrefour du Nord-Est.',
+      latitude: 8.04,
+      longitude: -2.8,
+      communes: [
+        { code: 'BON_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'FERKESSEDOUGOU',
+      name: 'Ferkessédougou',
+      region: 'Tchologo',
+      description: 'Porte du Nord — nœud routier vers le Mali et le Burkina Faso.',
+      latitude: 9.5928,
+      longitude: -5.1944,
+      communes: [
+        { code: 'FER_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'SEGUELA',
+      name: 'Séguéla',
+      region: 'Worodougou',
+      description: 'Chef-lieu du Worodougou, cœur historique du pays Mahou.',
+      latitude: 7.9611,
+      longitude: -6.6731,
+      communes: [
+        { code: 'SEG_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'ODIENNE',
+      name: 'Odienné',
+      region: 'Kabadougou',
+      description: 'Capitale du Kabadougou, dans le Nord-Ouest.',
+      latitude: 9.51,
+      longitude: -7.564,
+      communes: [
+        { code: 'ODI_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'BOUNDIALI',
+      name: 'Boundiali',
+      region: 'Bagoué',
+      description: 'Chef-lieu du Bagoué, pays Senoufo du Nord.',
+      latitude: 9.5217,
+      longitude: -6.4869,
+      communes: [
+        { code: 'BOU_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'KATIOLA',
+      name: 'Katiola',
+      region: 'Hambol',
+      description: 'Cité de la poterie, carrefour du centre-nord.',
+      latitude: 8.137,
+      longitude: -5.101,
+      communes: [
+        { code: 'KAT_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'BOUAFLE',
+      name: 'Bouaflé',
+      region: 'Marahoué',
+      description: 'Chef-lieu de la Marahoué, grand marché vivrier.',
+      latitude: 6.9904,
+      longitude: -5.7442,
+      communes: [
+        { code: 'BFL_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'SOUBRE',
+      name: 'Soubré',
+      region: 'Nawa',
+      description: 'Boucle du cacao du Sud-Ouest, près du barrage de Soubré.',
+      latitude: 5.7853,
+      longitude: -6.5934,
+      communes: [
+        { code: 'SOU_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'SASSANDRA',
+      name: 'Sassandra',
+      region: 'Gbôklé',
+      description: 'Port de pêche et station balnéaire de l\'Ouest.',
+      latitude: 4.95,
+      longitude: -6.0833,
+      communes: [
+        { code: 'SAS_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'GUIGLO',
+      name: 'Guiglo',
+      region: 'Cavally',
+      description: 'Chef-lieu du Cavally, pays Guéré à l\'ouest.',
+      latitude: 6.5436,
+      longitude: -7.4936,
+      communes: [
+        { code: 'GUI_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'DUEKOUE',
+      name: 'Duékoué',
+      region: 'Guémon',
+      description: 'Carrefour de l\'Ouest forestier, pays Guéré et Wobé.',
+      latitude: 6.7419,
+      longitude: -7.3494,
+      communes: [
+        { code: 'DUE_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'DANANE',
+      name: 'Danané',
+      region: 'Tonkpi',
+      description: 'Cité frontalière du Nord-Ouest, pays Yacouba.',
+      latitude: 7.2594,
+      longitude: -8.1547,
+      communes: [
+        { code: 'DAN_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'TOUMODI',
+      name: 'Toumodi',
+      region: 'Bélier',
+      description: 'Chef-lieu du Bélier, au sud de Yamoussoukro.',
+      latitude: 6.5583,
+      longitude: -5.0139,
+      communes: [
+        { code: 'TOM_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'TIASSALE',
+      name: 'Tiassalé',
+      region: 'Agnéby-Tiassa',
+      description: 'Cité du fleuve Bandama, carrefour Abidjan–Centre.',
+      latitude: 5.8983,
+      longitude: -4.8228,
+      communes: [
+        { code: 'TIA_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'GRAND_LAHOU',
+      name: 'Grand-Lahou',
+      region: 'Grands-Ponts',
+      description: 'Cité lagunaire au confluent du Bandama et de la lagune.',
+      latitude: 5.138,
+      longitude: -5.018,
+      communes: [
+        { code: 'GLA_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'ADIAKE',
+      name: 'Adiaké',
+      region: 'Sud-Comoé',
+      description: 'Cité lagunaire proche de la lagune Aby, Sud-Est.',
+      latitude: 5.286,
+      longitude: -3.304,
+      communes: [
+        { code: 'ADI_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'VAVOUA',
+      name: 'Vavoua',
+      region: 'Haut-Sassandra',
+      description: 'Carrefour du Haut-Sassandra entre Daloa et Séguéla.',
+      latitude: 7.38,
+      longitude: -6.48,
+      communes: [
+        { code: 'VAV_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'SINFRA',
+      name: 'Sinfra',
+      region: 'Marahoué',
+      description: 'Chef-lieu de la Marahoué forestière, pays Gouro.',
+      latitude: 6.6167,
+      longitude: -5.9167,
+      communes: [
+        { code: 'SIN_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'ISSIA',
+      name: 'Issia',
+      region: 'Haut-Sassandra',
+      description: 'Cité cacaoyère du Haut-Sassandra, pays Bété.',
+      latitude: 6.4924,
+      longitude: -6.5856,
+      communes: [
+        { code: 'ISS_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'LAKOTA',
+      name: 'Lakota',
+      region: 'Lôh-Djiboua',
+      description: 'Chef-lieu du Lôh-Djiboua, pays Dida.',
+      latitude: 5.847,
+      longitude: -5.682,
+      communes: [
+        { code: 'LAK_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'OUME',
+      name: 'Oumé',
+      region: 'Gôh',
+      description: 'Cité du Gôh, carrefour agricole du Centre-Ouest.',
+      latitude: 6.383,
+      longitude: -5.518,
+      communes: [
+        { code: 'OUM_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'BOUNA',
+      name: 'Bouna',
+      region: 'Gontougo',
+      description: 'Cité frontalière du Nord-Est, pays Koulango.',
+      latitude: 9.2667,
+      longitude: -2.9833,
+      communes: [
+        { code: 'BNO_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'TANDA',
+      name: 'Tanda',
+      region: 'Gontougo',
+      description: 'Carrefour du Nord-Est entre Bondoukou et Bouna.',
+      latitude: 7.8,
+      longitude: -3.1667,
+      communes: [
+        { code: 'TAN_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'TOUBA',
+      name: 'Touba',
+      region: 'Bafing',
+      description: 'Chef-lieu du Bafing, pays Mahou du Nord-Ouest.',
+      latitude: 8.284,
+      longitude: -7.683,
+      communes: [
+        { code: 'TBU_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'ZUENOULA',
+      name: 'Zuénoula',
+      region: 'Marahoué',
+      description: 'Cité du Marahoué, pays Gouro au centre-ouest.',
+      latitude: 7.431,
+      longitude: -6.051,
+      communes: [
+        { code: 'ZUE_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'BONOUA',
+      name: 'Bonoua',
+      region: 'Sud-Comoé',
+      description: 'Cité agricole du Sud-Comoé, pays Abouré.',
+      latitude: 5.4,
+      longitude: -3.6,
+      communes: [
+        { code: 'BNU_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'BONGOUANOU',
+      name: 'Bongouanou',
+      region: 'Moronou',
+      description: 'Chef-lieu du Moronou, pays Agni du Sud-Est.',
+      latitude: 6.65,
+      longitude: -4.2,
+      communes: [
+        { code: 'BGN_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'ARRAH',
+      name: 'Arrah',
+      region: 'Moronou',
+      description: 'Cité du Moronou, carrefour au sud de Bongouanou.',
+      latitude: 6.6667,
+      longitude: -3.9667,
+      communes: [
+        { code: 'ARR_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'DAOUKRO',
+      name: 'Daoukro',
+      region: 'Iffou',
+      description: 'Cité natale de Félix Houphouët-Boigny, pays N\'Gban.',
+      latitude: 7.05,
+      longitude: -3.9667,
+      communes: [
+        { code: 'DAK_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'MBAHIAKRO',
+      name: 'M\'Bahiakro',
+      region: 'Iffou',
+      description: 'Cité du pays Baoulé, sur l\'axe Abidjan–Bouaké.',
+      latitude: 7.45,
+      longitude: -4.3333,
+      communes: [
+        { code: 'MBA_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'BEOUMI',
+      name: 'Béoumi',
+      region: 'Gbêkê',
+      description: 'Cité du lac de Kossou, pays Baoulé du centre.',
+      latitude: 7.6667,
+      longitude: -5.5833,
+      communes: [
+        { code: 'BEO_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'SAKASSOU',
+      name: 'Sakassou',
+      region: 'Gbêkê',
+      description: 'Cité royale Baoulé au nord-est de Bouaké.',
+      latitude: 7.45,
+      longitude: -5.2833,
+      communes: [
+        { code: 'SAK_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'TENGRELA',
+      name: 'Tengréla',
+      region: 'Bagoué',
+      description: 'Cité frontalière du Nord, sur la route du Mali.',
+      latitude: 10.4833,
+      longitude: -6.4,
+      communes: [
+        { code: 'TEN_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'OUANGOLODOUGOU',
+      name: 'Ouangolodougou',
+      region: 'Tchologo',
+      description: 'Poste frontière du Nord vers le Burkina Faso.',
+      latitude: 9.9667,
+      longitude: -5.15,
+      communes: [
+        { code: 'OUA_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'MINIGNAN',
+      name: 'Minignan',
+      region: 'Kabadougou',
+      description: 'Cité du Kabadougou, extrême Nord-Ouest du pays.',
+      latitude: 9.997,
+      longitude: -7.7,
+      communes: [
+        { code: 'MIN_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'JACQUEVILLE',
+      name: 'Jacqueville',
+      region: 'Grands-Ponts',
+      description: 'Station balnéaire lagunaire, à l\'ouest d\'Abidjan.',
+      latitude: 5.2,
+      longitude: -4.4167,
+      communes: [
+        { code: 'JAC_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'ALEPE',
+      name: 'Alépé',
+      region: 'La Mé',
+      description: 'Cité forestière de La Mé, sur la rive du Comoé.',
+      latitude: 5.5,
+      longitude: -3.65,
+      communes: [
+        { code: 'ALE_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'SIKENSI',
+      name: 'Sikensi',
+      region: 'Agnéby-Tiassa',
+      description: 'Carrefour de l\'Agnéby-Tiassa, axe Abidjan–Divo.',
+      latitude: 5.6667,
+      longitude: -4.5667,
+      communes: [
+        { code: 'SIK_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'FRESCO',
+      name: 'Fresco',
+      region: 'Gbôklé',
+      description: 'Port de pêche du littoral ouest.',
+      latitude: 5.0833,
+      longitude: -5.6667,
+      communes: [
+        { code: 'FRE_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
+      ],
+    },
+    {
+      code: 'MEAGUI',
+      name: 'Méagui',
+      region: 'Nawa',
+      description: 'Cité cacaoyère de la Nawa, au sud-ouest.',
+      latitude: 5.4167,
+      longitude: -6.5667,
+      communes: [
+        { code: 'MEA_CENTRE', name: 'Centre', neighborhoods: ['Marché Central', 'Centre'] },
       ],
     },
   ];

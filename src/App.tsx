@@ -82,6 +82,10 @@ const AdminModerationPage = lazyPage(
   () => import('./pages/admin/AdminModerationPage.tsx'),
   'AdminModerationPage'
 );
+const AdminPropertiesPage = lazyPage(
+  () => import('./pages/admin/AdminPropertiesPage.tsx'),
+  'AdminPropertiesPage'
+);
 const AdminTransactionsPage = lazyPage(
   () => import('./pages/admin/AdminTransactionsPage.tsx'),
   'AdminTransactionsPage'
@@ -241,6 +245,7 @@ export default function App() {
             <Route path="users" element={<AdminUsersPage />} />
             <Route path="invitations" element={<AdminInvitationsPage />} />
             <Route path="moderation" element={<AdminModerationPage />} />
+            <Route path="properties" element={<AdminPropertiesPage />} />
             <Route path="transactions" element={<AdminTransactionsPage />} />
             <Route path="audit-logs" element={<AdminAuditLogsPage />} />
           </Route>

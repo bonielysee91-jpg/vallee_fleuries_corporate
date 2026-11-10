@@ -10,6 +10,7 @@ import {
   Users,
   MailPlus,
   FileCheck,
+  Building2,
   Receipt,
   ScrollText
 } from 'lucide-react';
@@ -19,6 +20,7 @@ const ADMIN_NAV = [
   { to: '/admin/users', label: 'Comptes & Rôles', icon: Users, end: false },
   { to: '/admin/invitations', label: 'Invitations', icon: MailPlus, end: false },
   { to: '/admin/moderation', label: 'Modération', icon: FileCheck, end: false },
+  { to: '/admin/properties', label: 'Biens & Annonces', icon: Building2, end: false },
   { to: '/admin/transactions', label: 'Transactions', icon: Receipt, end: false },
   { to: '/admin/audit-logs', label: "Journal d'audit", icon: ScrollText, end: false }
 ];

@@ -14,7 +14,6 @@ export const PaymentModal: React.FC = () => {
   const [cardExpiry, setCardExpiry] = useState('');
   const [cardCvv, setCardCvv] = useState('');
   const [confirmationCode, setConfirmationCode] = useState('');
-  const [devOtpCode, setDevOtpCode] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [paymentStep, setPaymentStep] = useState<'FORM' | 'CODE' | 'PROCESSING' | 'SUCCESS'>('FORM');
   const [completedTx, setCompletedTx] = useState<any>(null);
@@ -34,7 +33,6 @@ export const PaymentModal: React.FC = () => {
         return;
       }
 
-      setDevOtpCode(res.devOtpCode ?? null);
       setConfirmationCode('');
       setPaymentStep('CODE');
       addNotification(res.message || `Code de validation envoyé au ${phoneNumber}`, 'info');
@@ -114,7 +112,6 @@ export const PaymentModal: React.FC = () => {
     setPaymentStep('FORM');
     setCompletedTx(null);
     setConfirmationCode('');
-    setDevOtpCode(null);
     closePaymentModal();
   };
 
@@ -416,11 +413,6 @@ export const PaymentModal: React.FC = () => {
                   placeholder="••••••"
                   className="w-full px-3 py-3 text-lg rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-700 font-mono tracking-[0.5em] text-center"
                 />
-                {devOtpCode && (
-                  <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 mt-2 text-center">
-                    Environnement de test — code : <span className="font-mono font-bold">{devOtpCode}</span>
-                  </p>
-                )}
               </div>
 
               <div className="pt-1 space-y-2">
