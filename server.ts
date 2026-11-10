@@ -2254,8 +2254,25 @@ async function startServer() {
   const server = http.createServer(app);
   setupRealtimeChannel(server);
 
+  // Diagnostic explicite si le port est déjà pris : évite le crash `EADDRINUSE` brut
+  // (cause n°1 d'un lien qui « ne s'ouvre pas » : une instance précédente tourne encore).
+  server.on('error', (error: NodeJS.ErrnoException) => {
+    if (error.code === 'EADDRINUSE') {
+      console.error(
+        `\n[VFC] Le port ${PORT} est déjà utilisé : un serveur tourne probablement déjà.\n` +
+          `      → Soit vous ouvrez http://localhost:${PORT}\n` +
+          `      → Soit vous libérez le port, puis relancez « npm run dev » :\n` +
+          `        Get-NetTCPConnection -State Listen -LocalPort ${PORT} | Select-Object OwningProcess\n` +
+          `        Stop-Process -Id <PID> -Force\n`
+      );
+      process.exit(1);
+    }
+    throw error;
+  });
+
   server.listen(PORT, '0.0.0.0', () => {
-    console.log(`[VFC Production Engine] running on http://0.0.0.0:${PORT}`);
+    // On journalise `localhost` : `0.0.0.0` est une adresse d'écoute, non navigable.
+    console.log(`[VFC Production Engine] running on http://localhost:${PORT}`);
   });
 }
 

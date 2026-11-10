@@ -22,34 +22,101 @@ import { UserDashboardLayout } from './components/layout/UserDashboardLayout.tsx
 import { AdminDashboardLayout } from './components/layout/AdminDashboardLayout.tsx';
 import { NotificationToasts } from './components/layout/NotificationToasts.tsx';
 
-import { HomePage } from './pages/HomePage.tsx';
-import { AuthPage } from './pages/AuthPage.tsx';
-import { InvitationAcceptPage } from './pages/InvitationAcceptPage.tsx';
-import { PhoneVerificationPage } from './pages/PhoneVerificationPage.tsx';
-import { FavoritesPage } from './pages/FavoritesPage.tsx';
-import { MyRentalsPage } from './pages/MyRentalsPage.tsx';
-import { ProfileSettingsPage } from './pages/ProfileSettingsPage.tsx';
-import { SystemArchitecturePage } from './pages/SystemArchitecturePage.tsx';
-
-import { PropertyWizardPage } from './pages/dashboard/PropertyWizardPage.tsx';
-import { PropertyManagePage } from './pages/dashboard/PropertyManagePage.tsx';
-import { CalendarPage } from './pages/dashboard/CalendarPage.tsx';
-import { ReceiptsPage } from './pages/dashboard/ReceiptsPage.tsx';
-
-import { AdminOverviewPage } from './pages/admin/AdminOverviewPage.tsx';
-import { AdminUsersPage } from './pages/admin/AdminUsersPage.tsx';
-import { AdminInvitationsPage } from './pages/admin/AdminInvitationsPage.tsx';
-import { AdminModerationPage } from './pages/admin/AdminModerationPage.tsx';
-import { AdminTransactionsPage } from './pages/admin/AdminTransactionsPage.tsx';
-import { AdminAuditLogsPage } from './pages/admin/AdminAuditLogsPage.tsx';
-
-import { PropertyExplorer } from './components/properties/PropertyExplorer.tsx';
-import { PropertyDetail } from './components/properties/PropertyDetail.tsx';
-import { LandlordDashboard } from './components/dashboard/LandlordDashboard.tsx';
-import { CostEstimatorSection } from './components/home/CostEstimatorSection.tsx';
-
 import { registerNavigate } from './router/navigation.ts';
 import { useAppStore } from './store/useAppStore.ts';
+
+/**
+ * Chargement paresseux (code-splitting) : chaque page/écran part dans son propre
+ * chunk, chargé uniquement à la navigation. Le bundle initial ne contient donc que
+ * la coquille (layouts, auth, routeur), ce qui accélère le premier affichage.
+ * Les layouts partagés restent importés statiquement (ils encadrent tout le site).
+ */
+const lazyPage = <M, K extends keyof M>(loader: () => Promise<M>, name: K) =>
+  React.lazy(async () => {
+    const mod = await loader();
+    return { default: mod[name] as unknown as React.ComponentType<any> };
+  });
+
+const HomePage = lazyPage(() => import('./pages/HomePage.tsx'), 'HomePage');
+const AuthPage = lazyPage(() => import('./pages/AuthPage.tsx'), 'AuthPage');
+const InvitationAcceptPage = lazyPage(
+  () => import('./pages/InvitationAcceptPage.tsx'),
+  'InvitationAcceptPage'
+);
+const PhoneVerificationPage = lazyPage(
+  () => import('./pages/PhoneVerificationPage.tsx'),
+  'PhoneVerificationPage'
+);
+const FavoritesPage = lazyPage(() => import('./pages/FavoritesPage.tsx'), 'FavoritesPage');
+const MyRentalsPage = lazyPage(() => import('./pages/MyRentalsPage.tsx'), 'MyRentalsPage');
+const ProfileSettingsPage = lazyPage(
+  () => import('./pages/ProfileSettingsPage.tsx'),
+  'ProfileSettingsPage'
+);
+const SystemArchitecturePage = lazyPage(
+  () => import('./pages/SystemArchitecturePage.tsx'),
+  'SystemArchitecturePage'
+);
+
+const PropertyWizardPage = lazyPage(
+  () => import('./pages/dashboard/PropertyWizardPage.tsx'),
+  'PropertyWizardPage'
+);
+const PropertyManagePage = lazyPage(
+  () => import('./pages/dashboard/PropertyManagePage.tsx'),
+  'PropertyManagePage'
+);
+const CalendarPage = lazyPage(() => import('./pages/dashboard/CalendarPage.tsx'), 'CalendarPage');
+const ReceiptsPage = lazyPage(() => import('./pages/dashboard/ReceiptsPage.tsx'), 'ReceiptsPage');
+
+const AdminOverviewPage = lazyPage(
+  () => import('./pages/admin/AdminOverviewPage.tsx'),
+  'AdminOverviewPage'
+);
+const AdminUsersPage = lazyPage(() => import('./pages/admin/AdminUsersPage.tsx'), 'AdminUsersPage');
+const AdminInvitationsPage = lazyPage(
+  () => import('./pages/admin/AdminInvitationsPage.tsx'),
+  'AdminInvitationsPage'
+);
+const AdminModerationPage = lazyPage(
+  () => import('./pages/admin/AdminModerationPage.tsx'),
+  'AdminModerationPage'
+);
+const AdminTransactionsPage = lazyPage(
+  () => import('./pages/admin/AdminTransactionsPage.tsx'),
+  'AdminTransactionsPage'
+);
+const AdminAuditLogsPage = lazyPage(
+  () => import('./pages/admin/AdminAuditLogsPage.tsx'),
+  'AdminAuditLogsPage'
+);
+
+const PropertyExplorer = lazyPage(
+  () => import('./components/properties/PropertyExplorer.tsx'),
+  'PropertyExplorer'
+);
+const PropertyDetail = lazyPage(
+  () => import('./components/properties/PropertyDetail.tsx'),
+  'PropertyDetail'
+);
+const LandlordDashboard = lazyPage(
+  () => import('./components/dashboard/LandlordDashboard.tsx'),
+  'LandlordDashboard'
+);
+const CostEstimatorSection = lazyPage(
+  () => import('./components/home/CostEstimatorSection.tsx'),
+  'CostEstimatorSection'
+);
+
+/** Écran d'attente affiché pendant le chargement d'un chunk de route. */
+const RouteFallback: React.FC = () => (
+  <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]">
+    <div className="flex flex-col items-center gap-3 text-emerald-800">
+      <span className="w-9 h-9 rounded-full border-2 border-emerald-700/25 border-t-emerald-700 animate-spin" />
+      <span className="text-xs font-semibold tracking-wide">Chargement…</span>
+    </div>
+  </div>
+);
 
 /** Roles allowed inside the landlord / agency workspace. */
 const LANDLORD_ROLES = ['OWNER', 'AGENT', 'ADMIN'] as const;
@@ -83,6 +150,7 @@ export default function App() {
       <AuthProvider>
         <RouterBridge />
 
+        <React.Suspense fallback={<RouteFallback />}>
         <Routes>
           {/* ---------- UNIFIED AUTHENTICATION PORTAL ---------- */}
           <Route path="/login" element={<AuthPage mode="login" />} />
@@ -177,6 +245,7 @@ export default function App() {
             <Route path="audit-logs" element={<AdminAuditLogsPage />} />
           </Route>
         </Routes>
+        </React.Suspense>
 
         {/* Liquid Glass notifications — mounted at shell level so route guards
             and any nested page can raise alerts from anywhere. */}
