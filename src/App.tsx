@@ -25,6 +25,7 @@ import { NotificationToasts } from './components/layout/NotificationToasts.tsx';
 import { HomePage } from './pages/HomePage.tsx';
 import { AuthPage } from './pages/AuthPage.tsx';
 import { InvitationAcceptPage } from './pages/InvitationAcceptPage.tsx';
+import { PhoneVerificationPage } from './pages/PhoneVerificationPage.tsx';
 import { FavoritesPage } from './pages/FavoritesPage.tsx';
 import { MyRentalsPage } from './pages/MyRentalsPage.tsx';
 import { ProfileSettingsPage } from './pages/ProfileSettingsPage.tsx';
@@ -86,6 +87,9 @@ export default function App() {
           {/* ---------- UNIFIED AUTHENTICATION PORTAL ---------- */}
           <Route path="/login" element={<AuthPage mode="login" />} />
           <Route path="/register" element={<AuthPage mode="register" />} />
+
+          {/* Vérification du numéro après inscription self-service (code SMS). */}
+          <Route path="/verify-phone" element={<PhoneVerificationPage />} />
 
           {/* Invitation administrateur — page publique d'activation (lien reçu par e-mail). */}
           <Route path="/invitation" element={<InvitationAcceptPage />} />
@@ -150,6 +154,7 @@ export default function App() {
           >
             <Route index element={<LandlordDashboard />} />
             <Route path="properties/new" element={<PropertyWizardPage />} />
+            <Route path="properties/:id/edit" element={<PropertyWizardPage />} />
             <Route path="properties/manage" element={<PropertyManagePage />} />
             <Route path="calendar" element={<CalendarPage />} />
             <Route path="receipts" element={<ReceiptsPage />} />

@@ -123,6 +123,10 @@ model User {
   avatarUrl       String?
   companyName     String?           // Pour bailleurs institutionnels ou entreprises
   isKycVerified   Boolean           @default(false)
+  // Vérification du numéro par code SMS. Les comptes historiques et ceux créés par
+  // un administrateur sont considérés vérifiés ; seule l'inscription self-service
+  // impose la validation du code avant la première connexion.
+  phoneVerified   Boolean           @default(true)
   isBanned        Boolean           @default(false) // Suspension par le Super-Admin
   banReason       String?
   kycDocumentUrl  String?

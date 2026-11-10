@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Bell, BellRing, CalendarClock, CheckCheck, Phone, Wifi, WifiOff } from 'lucide-react';
+import { io, Socket } from 'socket.io-client';
 import { useAppStore } from '../../store/useAppStore.ts';
 
-/** Alerte poussée par le serveur sur le canal `/ws`. */
+/** Alerte poussée par le serveur sur le canal temps réel Socket.io. */
 interface VisitNotification {
   id: string;
   propertyTitle: string;
@@ -15,8 +16,6 @@ interface VisitNotification {
   receivedAt: string;
 }
 
-/** Délai de reconnexion du canal temps réel après une coupure. */
-const RECONNECT_DELAY_MS = 5000;
 /** Nombre maximal d'alertes conservées en mémoire à l'écran. */
 const MAX_ITEMS = 30;
 
@@ -42,52 +41,28 @@ export const AdminNotificationBell: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
 
-  const socketRef = useRef<WebSocket | null>(null);
-  const reconnectRef = useRef<number | null>(null);
+  const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
-    let disposed = false;
+    // Connexion à la même origine que l'application ; le cookie httpOnly de session
+    // authentifie l'administrateur lors de la poignée de main.
+    const socket = io({ path: '/socket.io', withCredentials: true });
+    socketRef.current = socket;
 
-    const connect = () => {
-      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      const socket = new WebSocket(`${protocol}://${window.location.host}/ws`);
-      socketRef.current = socket;
+    socket.on('connect', () => setIsConnected(true));
+    socket.on('disconnect', () => setIsConnected(false));
 
-      socket.onopen = () => {
-        if (!disposed) setIsConnected(true);
-      };
-
-      socket.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data as string) as {
-            type?: string;
-            payload?: VisitNotification;
-          };
-          if (data.type === 'visit:new' && data.payload) {
-            const alert = data.payload;
-            setItems((prev) => [alert, ...prev].slice(0, MAX_ITEMS));
-            setUnread((prev) => prev + 1);
-            addNotification(alert.message || 'Nouvelle demande de visite', 'info');
-          }
-        } catch {
-          // Charge utile non conforme : ignorée sans interrompre la cloche.
-        }
-      };
-
-      socket.onclose = () => {
-        setIsConnected(false);
-        if (!disposed) reconnectRef.current = window.setTimeout(connect, RECONNECT_DELAY_MS);
-      };
-
-      socket.onerror = () => socket.close();
-    };
-
-    connect();
+    socket.on('visit:new', (payload: VisitNotification) => {
+      if (!payload) return;
+      setItems((prev) => [payload, ...prev].slice(0, MAX_ITEMS));
+      setUnread((prev) => prev + 1);
+      addNotification(payload.message || 'Nouvelle demande de visite', 'info');
+    });
 
     return () => {
-      disposed = true;
-      if (reconnectRef.current) window.clearTimeout(reconnectRef.current);
-      socketRef.current?.close();
+      socket.removeAllListeners();
+      socket.disconnect();
+      socketRef.current = null;
     };
   }, [addNotification]);
 

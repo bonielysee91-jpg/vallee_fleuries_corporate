@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { WebSocketServer, WebSocket } from 'ws';
+import { Server as SocketIOServer, Socket } from 'socket.io';
 import { db } from './src/server/db.ts';
 import { neonClient } from './src/server/neon.ts';
 import { prisma } from './src/server/prisma.ts';
@@ -43,6 +43,7 @@ import {
   issueOtp,
   listAdminInvitations,
   markInvitationAccepted,
+  markPhoneVerified,
   revokeAdminInvitation,
   revokeSession,
   sendMail,
@@ -488,6 +489,24 @@ app.get('/api/system/architecture', async (_req, res) => {
 // 2. UNIFIED AUTHENTICATION ENGINE (EMAIL / PASSWORD OR +225 SMS OTP)
 // -------------------------------------------------------------
 
+/**
+ * Émet un code SMS d'inscription et tente l'envoi réel dès qu'une passerelle est
+ * configurée. Le code en clair n'est renvoyé qu'hors production (test sans SMS).
+ * Lève `SMS_NOT_CONFIGURED` en production si aucune passerelle n'est disponible.
+ */
+async function deliverRegistrationCode(phoneNumber: string): Promise<string | undefined> {
+  const { code } = await issueOtp(phoneNumber, 'REGISTER');
+  if (isSmsConfigured()) {
+    await sendSms(
+      phoneNumber,
+      `Vallées Fleuries : votre code de validation d'inscription est ${code}. Valable 10 minutes.`
+    );
+  } else if (isProduction) {
+    throw new Error('SMS_NOT_CONFIGURED');
+  }
+  return isProduction ? undefined : code;
+}
+
 // A. Registration — always hashes the password before it touches Neon.
 app.post('/api/auth/register', async (req, res) => {
   try {
@@ -523,6 +542,8 @@ app.post('/api/auth/register', async (req, res) => {
     const safeRole: UserRole =
       requestedRole === 'OWNER' ? 'OWNER' : requestedRole === 'AGENT' ? 'AGENT' : 'TENANT';
 
+    // Le compte self-service démarre non vérifié : la connexion restera refusée
+    // tant que le code SMS d'activation n'aura pas été validé.
     const user = await createUser({
       email,
       phoneNumber: cleanPhone,
@@ -530,31 +551,138 @@ app.post('/api/auth/register', async (req, res) => {
       password,
       role: safeRole,
       companyName,
+      phoneVerified: false,
     });
 
-    const { accessToken } = await issueTokenPair(req, res, user);
+    const devOtpCode = await deliverRegistrationCode(cleanPhone);
+
     await writeAuditLog({
       userId: user.id,
       action: 'REGISTER',
       entity: 'USER',
       entityId: user.id,
       ipAddress: sessionMeta(req).ipAddress,
-      details: { role: user.role, method: 'PASSWORD' },
+      details: { role: user.role, method: 'PASSWORD', codeDelivered: isSmsConfigured() },
     });
 
     res.status(201).json({
       success: true,
-      message: 'Compte créé avec succès',
-      user: toDomainUser(user),
-      token: accessToken,
+      message: `Compte créé. Un code de validation a été envoyé par SMS au ${cleanPhone}.`,
+      requiresVerification: true,
+      phoneNumber: cleanPhone,
+      // Renvoyé uniquement hors production pour rester testable sans passerelle SMS.
+      ...(devOtpCode ? { devOtpCode } : {}),
     });
   } catch (error: any) {
     console.error('[Register]', error);
+    if (error.message === 'SMS_NOT_CONFIGURED') {
+      return res.status(503).json({
+        success: false,
+        error:
+          'Passerelle SMS non configurée : le code de validation ne peut pas être envoyé pour le moment.',
+      });
+    }
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// B. Password Login — verifies the PBKDF2 hash stored in Neon.
+// B. Validation du code SMS d'inscription — active le compte et ouvre la session.
+app.post('/api/auth/register/verify', async (req, res) => {
+  try {
+    const { phoneNumber, code } = req.body;
+    if (!phoneNumber || !code) {
+      return res.status(400).json({ success: false, error: 'Numéro et code SMS requis' });
+    }
+
+    const cleanPhone = sanitizeIvorianPhone(phoneNumber);
+    const isValid = await consumeOtp(cleanPhone, code, 'REGISTER');
+    if (!isValid) {
+      await writeAuditLog({
+        action: 'OTP_FAILED',
+        entity: 'USER',
+        ipAddress: sessionMeta(req).ipAddress,
+        details: { phoneNumber: cleanPhone, purpose: 'REGISTER' },
+      });
+      return res.status(400).json({
+        success: false,
+        code: 'INVALID_CODE',
+        error: 'Code de validation incorrect ou expiré',
+      });
+    }
+
+    const user = await findUserByIdentifier(cleanPhone);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'Aucun compte ne correspond à ce numéro. Veuillez vous inscrire.',
+      });
+    }
+
+    const verifiedUser = user.phoneVerified ? user : await markPhoneVerified(user.id);
+
+    const { accessToken } = await issueTokenPair(req, res, verifiedUser);
+    await writeAuditLog({
+      userId: verifiedUser.id,
+      action: 'REGISTER_VERIFIED',
+      entity: 'USER',
+      entityId: verifiedUser.id,
+      ipAddress: sessionMeta(req).ipAddress,
+      details: { method: 'SMS_OTP' },
+    });
+
+    res.json({
+      success: true,
+      message: 'Numéro vérifié — bienvenue sur Vallées Fleuries Corporate',
+      user: toDomainUser(verifiedUser),
+      token: accessToken,
+    });
+  } catch (error: any) {
+    console.error('[Register Verify]', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// C. Renvoi du code d'inscription (le précédent est invalidé par issueOtp).
+app.post('/api/auth/register/resend', async (req, res) => {
+  try {
+    const { phoneNumber } = req.body;
+    if (!phoneNumber) {
+      return res.status(400).json({ success: false, error: 'Numéro de téléphone requis (+225)' });
+    }
+
+    const cleanPhone = sanitizeIvorianPhone(phoneNumber);
+    const user = await findUserByIdentifier(cleanPhone);
+    if (!user) {
+      return res
+        .status(404)
+        .json({ success: false, error: 'Aucun compte ne correspond à ce numéro.' });
+    }
+    if (user.phoneVerified) {
+      return res.status(409).json({
+        success: false,
+        error: 'Ce numéro est déjà vérifié. Vous pouvez vous connecter.',
+      });
+    }
+
+    const devOtpCode = await deliverRegistrationCode(cleanPhone);
+    res.json({
+      success: true,
+      message: `Nouveau code de validation envoyé au ${cleanPhone}.`,
+      ...(devOtpCode ? { devOtpCode } : {}),
+    });
+  } catch (error: any) {
+    console.error('[Register Resend]', error);
+    if (error.message === 'SMS_NOT_CONFIGURED') {
+      return res.status(503).json({
+        success: false,
+        error: 'Passerelle SMS non configurée : aucun code ne peut être envoyé pour le moment.',
+      });
+    }
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// D. Password Login — verifies the PBKDF2 hash stored in Neon.
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { identifier, password } = req.body;
@@ -607,6 +735,24 @@ app.post('/api/auth/login', async (req, res) => {
       });
     }
 
+    if (!user.phoneVerified) {
+      await writeAuditLog({
+        userId: user.id,
+        action: 'LOGIN_BLOCKED',
+        entity: 'USER',
+        entityId: user.id,
+        ipAddress: sessionMeta(req).ipAddress,
+        details: { reason: 'PHONE_NOT_VERIFIED' },
+      });
+      return res.status(403).json({
+        success: false,
+        code: 'PHONE_NOT_VERIFIED',
+        phoneNumber: user.phoneNumber,
+        error:
+          'Numéro non vérifié. Saisissez le code reçu par SMS pour activer votre compte.',
+      });
+    }
+
     const { accessToken } = await issueTokenPair(req, res, user);
     await writeAuditLog({
       userId: user.id,
@@ -629,7 +775,7 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// C. Send SMS OTP to an Ivorian +225 number
+// E. Send SMS OTP to an Ivorian +225 number
 app.post('/api/auth/otp/send', async (req, res) => {
   try {
     const { phoneNumber, purpose = 'LOGIN' } = req.body;
@@ -669,7 +815,7 @@ app.post('/api/auth/otp/send', async (req, res) => {
   }
 });
 
-// D. Verify SMS OTP then sign in (creating the account on first use)
+// F. Verify SMS OTP then sign in (creating the account on first use)
 app.post('/api/auth/otp/verify', async (req, res) => {
   try {
     const { phoneNumber, code, fullName, role = 'TENANT' } = req.body;
@@ -892,6 +1038,85 @@ app.patch(
   }
 );
 
+// Full edit of a listing: owner/agent may edit their own listing only, admin any.
+app.put(
+  ['/api/rentals/:id', '/api/properties/:id'],
+  authenticateJWT,
+  requireRole(['OWNER', 'AGENT', 'ADMIN']),
+  async (req, res) => {
+    try {
+      const user = (req as AuthedRequest).user!;
+      const result = await db.updateProperty(req.params.id, req.body, {
+        userId: user.userId,
+        isAdmin: user.role === 'ADMIN' || user.role === 'SUPER_ADMIN',
+      });
+      if (result.status === 'not_found') {
+        return res.status(404).json({ success: false, error: 'Bien introuvable' });
+      }
+      if (result.status === 'forbidden') {
+        return res.status(403).json({
+          success: false,
+          error: 'Vous ne pouvez modifier que les biens dont vous êtes propriétaire.',
+        });
+      }
+      await writeAuditLog({
+        userId: user.userId,
+        action: 'PROPERTY_UPDATE',
+        entity: 'PROPERTY',
+        entityId: result.property.id,
+        ipAddress: sessionMeta(req).ipAddress,
+        details: { title: result.property.title, priceFcfa: result.property.priceFcfa },
+      });
+      res.json({ success: true, data: result.property });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: error.message });
+    }
+  }
+);
+
+// Deletion of a listing — refused while bookings, leases or visit requests remain attached.
+app.delete(
+  ['/api/rentals/:id', '/api/properties/:id'],
+  authenticateJWT,
+  requireRole(['OWNER', 'AGENT', 'ADMIN']),
+  async (req, res) => {
+    try {
+      const user = (req as AuthedRequest).user!;
+      const result = await db.deleteProperty(req.params.id, {
+        userId: user.userId,
+        isAdmin: user.role === 'ADMIN' || user.role === 'SUPER_ADMIN',
+      });
+      if (result === 'not_found') {
+        return res.status(404).json({ success: false, error: 'Bien introuvable' });
+      }
+      if (result === 'forbidden') {
+        return res.status(403).json({
+          success: false,
+          error: 'Vous ne pouvez supprimer que les biens dont vous êtes propriétaire.',
+        });
+      }
+      if (result === 'has_dependencies') {
+        return res.status(409).json({
+          success: false,
+          error:
+            'Ce bien possède des réservations, baux ou demandes de visite : la suppression est impossible tant que ces dossiers existent.',
+        });
+      }
+      await writeAuditLog({
+        userId: user.userId,
+        action: 'PROPERTY_DELETE',
+        entity: 'PROPERTY',
+        entityId: req.params.id,
+        ipAddress: sessionMeta(req).ipAddress,
+        details: { deleted: true },
+      });
+      res.json({ success: true, data: { id: req.params.id } });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: error.message });
+    }
+  }
+);
+
 // -------------------------------------------------------------
 // 5. IVORIAN MOVE-IN COST CALCULATOR (LEGAL 2-MONTH ADVANCE + 2-MONTH CAUTION)
 // -------------------------------------------------------------
@@ -915,19 +1140,16 @@ app.get('/api/calculator/move-in', (req, res) => {
 // -------------------------------------------------------------
 // 5bis. NOTIFICATIONS TEMPS RÉEL (cloche du Command Center)
 // -------------------------------------------------------------
-// Les administrateurs connectés au back-office ouvrent un canal WebSocket :
+// Les administrateurs connectés au back-office ouvrent un canal Socket.io :
 // toute nouvelle demande de visite y est poussée instantanément, en complément
 // d'un e-mail à la Direction. Aucun doublon de transporteur e-mail : on réutilise
 // `sendMail` (voir `src/server/authService.ts`).
-const adminSockets = new Set<WebSocket>();
+const adminSockets = new Set<Socket>();
 
 /** Diffuse un événement à tous les postes d'administration connectés. */
 function broadcastToAdmins(type: string, payload: unknown): void {
-  const message = JSON.stringify({ type, payload });
   for (const socket of adminSockets) {
-    if (socket.readyState === WebSocket.OPEN) {
-      socket.send(message);
-    }
+    socket.emit(type, payload);
   }
 }
 
@@ -1005,33 +1227,40 @@ async function notifyAdminsOfNewVisit(visit: any): Promise<void> {
 }
 
 /**
- * Crée le canal WebSocket sur le serveur HTTP, en chemin dédié `/ws` (aucune
- * interférence avec les mises à niveau éventuelles d'autres outils). Seuls les
- * jetons portant un rôle ADMIN / SUPER_ADMIN sont acceptés : la session est lue
- * depuis le cookie httpOnly de la requête de poignée de main.
+ * Crée le canal Socket.io greffé sur le serveur HTTP. Seuls les jetons portant un
+ * rôle ADMIN / SUPER_ADMIN sont acceptés : la session est lue depuis le cookie
+ * httpOnly porté par la poignée de main, ce qui interdit à un client de se
+ * déclarer administrateur de lui-même.
  */
-function setupRealtimeChannel(server: http.Server): WebSocketServer {
-  const wss = new WebSocketServer({ server, path: '/ws' });
+function setupRealtimeChannel(server: http.Server): SocketIOServer {
+  const io = new SocketIOServer(server, {
+    path: '/socket.io',
+    // Même origine en production ; `origin: true` reflète l'origine appelante
+    // plutôt qu'un joker `*`, incompatible avec l'envoi des cookies de session.
+    cors: { origin: true, credentials: true },
+  });
 
-  wss.on('connection', (socket, request) => {
-    const token = parseCookies(request.headers.cookie)[ACCESS_TOKEN_COOKIE];
+  io.use((socket, next) => {
+    const token = parseCookies(socket.handshake.headers.cookie)[ACCESS_TOKEN_COOKIE];
     const payload = token ? verifyJwtToken(token) : null;
     const role = payload?.role;
 
     if (!payload || (role !== 'ADMIN' && role !== 'SUPER_ADMIN')) {
-      socket.close(1008, 'Authentification administrateur requise');
+      next(new Error('Authentification administrateur requise'));
       return;
     }
 
-    adminSockets.add(socket);
-    socket.send(JSON.stringify({ type: 'ready', payload: { role } }));
-
-    const release = () => adminSockets.delete(socket);
-    socket.on('close', release);
-    socket.on('error', release);
+    socket.data.role = role;
+    next();
   });
 
-  return wss;
+  io.on('connection', (socket) => {
+    adminSockets.add(socket);
+    socket.emit('ready', { role: socket.data.role });
+    socket.on('disconnect', () => adminSockets.delete(socket));
+  });
+
+  return io;
 }
 
 // -------------------------------------------------------------

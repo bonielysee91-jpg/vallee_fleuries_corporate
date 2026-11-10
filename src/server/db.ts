@@ -515,6 +515,105 @@ class PrismaRepository {
     return toDomainProperty(updated);
   }
 
+  /**
+   * Full edit of an existing listing. Ownership is enforced here: a landlord/agent
+   * may only touch their own listing, while an admin may touch any. Returns a
+   * discriminated result so the route maps it to the right HTTP status.
+   */
+  public async updateProperty(
+    id: string,
+    data: Partial<Property>,
+    requester: { userId: string; isAdmin: boolean }
+  ): Promise<
+    | { status: 'ok'; property: Property }
+    | { status: 'not_found' }
+    | { status: 'forbidden' }
+  > {
+    const existing = await prisma.property.findFirst({
+      where: { OR: [{ id }, { slug: id }] },
+      select: { id: true, ownerId: true },
+    });
+    if (!existing) return { status: 'not_found' };
+
+    if (!requester.isAdmin && existing.ownerId && existing.ownerId !== requester.userId) {
+      return { status: 'forbidden' };
+    }
+
+    if (data.category && !isAllowedTransactionType(data.category)) {
+      throw new Error(
+        "Nature d'offre non autorisée : seules la Vente et la Location longue durée sont modifiables."
+      );
+    }
+    if (data.type && !isAllowedPropertyType(data.type)) {
+      throw new Error('Typologie de bien non autorisée au catalogue.');
+    }
+
+    const patch: Prisma.PropertyUpdateInput = {};
+    if (data.title !== undefined) patch.title = data.title;
+    if (data.description !== undefined) patch.description = data.description;
+    if (data.category !== undefined) {
+      patch.category = data.category as Prisma.PropertyUpdateInput['category'];
+    }
+    if (data.type !== undefined) patch.type = data.type as Prisma.PropertyUpdateInput['type'];
+    if (data.furnishing !== undefined) {
+      patch.furnishing = data.furnishing as Prisma.PropertyUpdateInput['furnishing'];
+    }
+    if (data.priceFcfa !== undefined) patch.priceFcfa = Number(data.priceFcfa);
+    if (data.serviceChargeFcfa !== undefined) {
+      patch.serviceChargeFcfa = Number(data.serviceChargeFcfa);
+    }
+    if (data.isNegotiable !== undefined) patch.isNegotiable = Boolean(data.isNegotiable);
+    if (data.city !== undefined) patch.city = data.city;
+    if (data.commune !== undefined) patch.commune = data.commune;
+    if (data.neighborhood !== undefined) patch.neighborhood = data.neighborhood;
+    if (data.address !== undefined) patch.address = data.address;
+    if (data.surfaceM2 !== undefined) patch.surfaceM2 = Number(data.surfaceM2);
+    if (data.bedrooms !== undefined) patch.bedrooms = Number(data.bedrooms);
+    if (data.bathrooms !== undefined) patch.bathrooms = Number(data.bathrooms);
+    if (data.hasGenerator !== undefined) patch.hasGenerator = Boolean(data.hasGenerator);
+    if (data.hasWaterReserve !== undefined) patch.hasWaterReserve = Boolean(data.hasWaterReserve);
+    if (data.hasSecurity247 !== undefined) patch.hasSecurity247 = Boolean(data.hasSecurity247);
+    if (data.hasSwimmingPool !== undefined) patch.hasSwimmingPool = Boolean(data.hasSwimmingPool);
+    if (data.hasFiberInternet !== undefined) patch.hasFiberInternet = Boolean(data.hasFiberInternet);
+
+    const updated = await prisma.property.update({
+      where: { id: existing.id },
+      data: patch,
+      include: propertyInclude,
+    });
+    return { status: 'ok', property: toDomainProperty(updated) };
+  }
+
+  /**
+   * Hard-deletes a listing after verifying no legal / financial history is attached.
+   * Images, amenities and favourites cascade; bookings, leases and visit requests
+   * are non-cascading by design, so their presence blocks the deletion.
+   */
+  public async deleteProperty(
+    id: string,
+    requester: { userId: string; isAdmin: boolean }
+  ): Promise<'ok' | 'not_found' | 'forbidden' | 'has_dependencies'> {
+    const existing = await prisma.property.findFirst({
+      where: { OR: [{ id }, { slug: id }] },
+      select: { id: true, ownerId: true },
+    });
+    if (!existing) return 'not_found';
+
+    if (!requester.isAdmin && existing.ownerId && existing.ownerId !== requester.userId) {
+      return 'forbidden';
+    }
+
+    const [bookings, leases, visits] = await Promise.all([
+      prisma.booking.count({ where: { propertyId: existing.id } }),
+      prisma.leaseAgreement.count({ where: { propertyId: existing.id } }),
+      prisma.visitAppointment.count({ where: { propertyId: existing.id } }),
+    ]);
+    if (bookings + leases + visits > 0) return 'has_dependencies';
+
+    await prisma.property.delete({ where: { id: existing.id } });
+    return 'ok';
+  }
+
   // ---- IVORIAN LEGAL MOVE-IN COST CALCULATOR (Loi 2019-576) ----
   public calculateMoveInCost(
     monthlyRent: number,

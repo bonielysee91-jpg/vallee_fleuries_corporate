@@ -8,8 +8,10 @@ import {
   Eye,
   Loader2,
   MapPin,
+  Pencil,
   Plus,
   Search,
+  Trash2,
   Wallet
 } from 'lucide-react';
 
@@ -42,11 +44,13 @@ const statusMeta = (status: PropertyStatus) =>
 /** `/dashboard/properties/manage` — table CRUD des biens du propriétaire. */
 export const PropertyManagePage: React.FC = () => {
   const addNotification = useAppStore((state) => state.addNotification);
+  const currentUser = useAppStore((state) => state.currentUser);
 
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -111,6 +115,30 @@ export const PropertyManagePage: React.FC = () => {
       );
     } finally {
       setUpdatingId(null);
+    }
+  };
+
+  const isAdmin = currentUser?.role === 'ADMIN' || currentUser?.role === 'SUPER_ADMIN';
+  const canManage = (property: Property) =>
+    isAdmin || (!!currentUser && property.ownerId === currentUser.id);
+
+  const handleDelete = async (property: Property) => {
+    const confirmed = window.confirm(
+      `Supprimer définitivement « ${property.title} » ? Cette action est irréversible.`
+    );
+    if (!confirmed) return;
+    setDeletingId(property.id);
+    try {
+      await api.deleteProperty(property.id);
+      setProperties((prev) => prev.filter((item) => item.id !== property.id));
+      addNotification(`Annonce « ${property.title} » supprimée`, 'success');
+    } catch (err) {
+      addNotification(
+        err instanceof Error ? err.message : 'Suppression impossible',
+        'error'
+      );
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -278,6 +306,30 @@ export const PropertyManagePage: React.FC = () => {
                             <Eye className="w-3.5 h-3.5" />
                             Aperçu
                           </Link>
+                          {canManage(prop) && (
+                            <>
+                              <Link
+                                to={`/dashboard/properties/${prop.id}/edit`}
+                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-slate-200 text-emerald-800 text-xs font-semibold hover:bg-emerald-50 transition-colors"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                                Modifier
+                              </Link>
+                              <button
+                                type="button"
+                                disabled={deletingId === prop.id}
+                                onClick={() => handleDelete(prop)}
+                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-rose-200 text-rose-700 text-xs font-semibold hover:bg-rose-50 disabled:opacity-50 transition-colors"
+                              >
+                                {deletingId === prop.id ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                )}
+                                Supprimer
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -354,6 +406,31 @@ export const PropertyManagePage: React.FC = () => {
                       Aperçu
                     </Link>
                   </div>
+
+                  {canManage(prop) && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <Link
+                        to={`/dashboard/properties/${prop.id}/edit`}
+                        className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-slate-200 text-emerald-800 text-xs font-semibold hover:bg-emerald-50 transition-colors"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                        Modifier
+                      </Link>
+                      <button
+                        type="button"
+                        disabled={deletingId === prop.id}
+                        onClick={() => handleDelete(prop)}
+                        className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-rose-200 text-rose-700 text-xs font-semibold hover:bg-rose-50 disabled:opacity-50 transition-colors"
+                      >
+                        {deletingId === prop.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-3.5 h-3.5" />
+                        )}
+                        Supprimer
+                      </button>
+                    </div>
+                  )}
                 </li>
               );
             })}

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useAppStore } from '../../store/useAppStore.ts';
 import { api, formatFcfa } from '../../services/api.ts';
 import { FurnishingStatus, PropertyType, RentalCategory } from '../../types/index.ts';
@@ -16,6 +16,7 @@ import {
   Loader2,
   MapPin,
   Ruler,
+  Save,
   Sparkles,
   Send
 } from 'lucide-react';
@@ -34,13 +35,16 @@ const FURNISHINGS: { id: FurnishingStatus; label: string }[] = [
 ];
 const COMMUNES = ['Cocody', 'Marcory', 'Yopougon', 'Plateau', 'Riviera'];
 
-/** `/dashboard/properties/new` — multi-step publication wizard. */
+/** `/dashboard/properties/new` (création) & `/dashboard/properties/:id/edit` (édition) — wizard multi-étapes. */
 export const PropertyWizardPage: React.FC = () => {
   const navigate = useNavigate();
+  const { id } = useParams<{ id?: string }>();
+  const isEdit = Boolean(id);
   const addNotification = useAppStore((state) => state.addNotification);
 
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
+  const [loadingExisting, setLoadingExisting] = useState(isEdit);
 
   const [form, setForm] = useState({
     category: 'LONG_TERM_RENT' as RentalCategory,
@@ -67,9 +71,57 @@ export const PropertyWizardPage: React.FC = () => {
   const update = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
 
+  // Mode édition : on charge le bien existant puis on préremplit l'assistant.
+  useEffect(() => {
+    if (!id) return;
+    let active = true;
+    setLoadingExisting(true);
+    api
+      .getPropertyById(id)
+      .then((property) => {
+        if (!active) return;
+        if (!property) {
+          addNotification('Bien introuvable', 'error');
+          navigate('/dashboard/properties/manage');
+          return;
+        }
+        setForm({
+          category: property.category as RentalCategory,
+          type: property.type,
+          furnishing: property.furnishing,
+          title: property.title,
+          description: property.description,
+          commune: property.commune,
+          neighborhood: property.neighborhood,
+          address: property.address,
+          surfaceM2: property.surfaceM2,
+          bedrooms: property.bedrooms,
+          bathrooms: property.bathrooms,
+          priceFcfa: property.priceFcfa,
+          serviceChargeFcfa: property.serviceChargeFcfa ?? 0,
+          isNegotiable: property.isNegotiable,
+          hasGenerator: property.hasGenerator,
+          hasWaterReserve: property.hasWaterReserve,
+          hasSecurity247: property.hasSecurity247,
+          hasSwimmingPool: property.hasSwimmingPool,
+          hasFiberInternet: property.hasFiberInternet
+        });
+      })
+      .catch((err: any) => {
+        addNotification(err?.message || 'Chargement du bien impossible', 'error');
+        navigate('/dashboard/properties/manage');
+      })
+      .finally(() => {
+        if (active) setLoadingExisting(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [id, addNotification, navigate]);
+
   const steps = ['Produit', 'Localisation', 'Caractéristiques', 'Récapitulatif'];
 
-  const handlePublish = async () => {
+  const handleSubmit = async () => {
     if (!form.title.trim()) {
       addNotification('Le titre de l\'annonce est obligatoire', 'warning');
       setStep(1);
@@ -78,21 +130,30 @@ export const PropertyWizardPage: React.FC = () => {
 
     setSubmitting(true);
     try {
-      const created = await api.createProperty({
+      const payload = {
         ...form,
         city: 'Abidjan',
         priceFcfa: Number(form.priceFcfa),
         depositMonths: 2,
         advanceMonths: 2,
         agencyFeeMonths: 1
-      });
+      };
+      const saved =
+        isEdit && id
+          ? await api.updateProperty(id, payload)
+          : await api.createProperty(payload);
       addNotification(
-        `Annonce « ${created.title} » transmise pour vérification VFC`,
+        isEdit
+          ? `Annonce « ${saved.title} » mise à jour`
+          : `Annonce « ${saved.title} » transmise pour vérification VFC`,
         'success'
       );
       navigate('/dashboard/properties/manage');
     } catch (err: any) {
-      addNotification(err?.message || 'Publication impossible', 'error');
+      addNotification(
+        err?.message || (isEdit ? 'Mise à jour impossible' : 'Publication impossible'),
+        'error'
+      );
     } finally {
       setSubmitting(false);
     }
@@ -110,12 +171,21 @@ export const PropertyWizardPage: React.FC = () => {
     { key: 'hasFiberInternet', label: 'Fibre optique' }
   ];
 
+  if (loadingExisting) {
+    return (
+      <div className="flex items-center justify-center gap-2 py-20 text-xs text-slate-500">
+        <Loader2 className="w-5 h-5 animate-spin text-emerald-700" />
+        Chargement de l'annonce…
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="font-serif text-2xl font-bold text-slate-900">
-            Publier une nouvelle location
+            {isEdit ? "Modifier l'annonce" : 'Publier une nouvelle location'}
           </h1>
           <p className="text-xs text-slate-500 mt-1">
             Étape {step} sur {steps.length} · {steps[step - 1]}
@@ -224,7 +294,10 @@ export const PropertyWizardPage: React.FC = () => {
                   onChange={(e) => update('commune', e.target.value)}
                   className={inputClass}
                 >
-                  {COMMUNES.map((commune) => (
+                  {(COMMUNES.includes(form.commune)
+                    ? COMMUNES
+                    : [form.commune, ...COMMUNES]
+                  ).map((commune) => (
                     <option key={commune} value={commune}>
                       {commune}
                     </option>
@@ -414,12 +487,18 @@ export const PropertyWizardPage: React.FC = () => {
           </button>
         ) : (
           <button
-            onClick={handlePublish}
+            onClick={handleSubmit}
             disabled={submitting}
             className="inline-flex items-center gap-2 px-5 py-3 rounded-2xl bg-gradient-to-r from-amber-400 to-[#D97706] text-emerald-950 text-xs font-black hover:brightness-105 transition-all disabled:opacity-60"
           >
-            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-            Publier l'annonce
+            {submitting ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : isEdit ? (
+              <Save className="w-4 h-4" />
+            ) : (
+              <Send className="w-4 h-4" />
+            )}
+            {isEdit ? 'Enregistrer les modifications' : "Publier l'annonce"}
           </button>
         )}
       </div>

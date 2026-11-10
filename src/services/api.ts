@@ -40,12 +40,15 @@ export function getAccessToken(): string | null {
 export class ApiError extends Error {
   status: number;
   code?: string;
+  /** Charge utile d'erreur renvoyée par l'API (ex. `phoneNumber` d'un compte non vérifié). */
+  payload?: unknown;
 
-  constructor(message: string, status: number, code?: string) {
+  constructor(message: string, status: number, code?: string, payload?: unknown) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
+    this.payload = payload;
   }
 }
 
@@ -105,7 +108,8 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     throw new ApiError(
       (json?.error as string) || `Erreur serveur (${res.status})`,
       res.status,
-      json?.code as string | undefined
+      json?.code as string | undefined,
+      json ?? undefined
     );
   }
 
@@ -115,6 +119,16 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 export interface AuthResult {
   user: User;
   token: string;
+}
+
+/** Retour de l'inscription self-service : le compte est créé mais non encore vérifié. */
+export interface RegisterResult {
+  success: boolean;
+  message: string;
+  requiresVerification: boolean;
+  phoneNumber: string;
+  /** Renvoyé uniquement hors production (aucune passerelle SMS configurée). */
+  devOtpCode?: string;
 }
 
 export interface AdminUserPage {
@@ -213,6 +227,10 @@ export const api = {
     return { user: json.user, token: json.token };
   },
 
+  /**
+   * Inscription self-service : le compte est créé au statut « non vérifié ».
+   * Aucun jeton n'est délivré tant que le code SMS n'a pas été confirmé.
+   */
   async registerUser(userData: {
     fullName: string;
     phoneNumber: string;
@@ -220,13 +238,28 @@ export const api = {
     password?: string;
     role?: UserRole;
     companyName?: string;
-  }): Promise<AuthResult> {
-    const json = await request<AuthResult & { success: boolean }>('/auth/register', {
+  }): Promise<RegisterResult> {
+    return request<RegisterResult>('/auth/register', {
       method: 'POST',
       body: userData
     });
+  },
+
+  /** Valide le code reçu par SMS et active la session en cas de succès. */
+  async verifyRegistration(phoneNumber: string, code: string): Promise<AuthResult> {
+    const json = await request<AuthResult & { success: boolean }>('/auth/register/verify', {
+      method: 'POST',
+      body: { phoneNumber, code }
+    });
     setAccessToken(json.token);
     return { user: json.user, token: json.token };
+  },
+
+  /** Renvoie un nouveau code si le compte n'est pas encore vérifié. */
+  async resendRegistrationCode(
+    phoneNumber: string
+  ): Promise<{ success: boolean; message: string; devOtpCode?: string }> {
+    return request('/auth/register/resend', { method: 'POST', body: { phoneNumber } });
   },
 
   async sendSmsOtp(phoneNumber: string): Promise<{ success: boolean; devOtpCode?: string }> {
@@ -336,6 +369,20 @@ export const api = {
       body: propertyData
     });
     return json.data;
+  },
+
+  async updateProperty(id: string, propertyData: Partial<Property>): Promise<Property> {
+    const json = await request<{ data: Property }>(
+      `/properties/${encodeURIComponent(id)}`,
+      { method: 'PUT', body: propertyData }
+    );
+    return json.data;
+  },
+
+  async deleteProperty(id: string): Promise<void> {
+    await request<{ success: boolean }>(`/properties/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    });
   },
 
   async updatePropertyStatus(id: string, status: Property['status']): Promise<Property> {

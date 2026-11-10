@@ -102,20 +102,35 @@ export const AuthPage: React.FC<AuthPageProps> = ({ mode }) => {
 
     setLoading(true);
     try {
-      const result = isRegister
-        ? await api.registerUser({
-            fullName: fullName.trim(),
-            phoneNumber: phoneNumber.trim(),
-            email: identifier.trim() || undefined,
-            password,
-            role,
-            companyName: role === 'OWNER' ? companyName.trim() || undefined : undefined
-          })
-        : await api.loginWithPassword(identifier.trim(), password);
+      if (isRegister) {
+        // Création du compte (statut « non vérifié ») puis envoi automatique du
+        // code SMS. La session n'est ouverte qu'après validation du code.
+        const result = await api.registerUser({
+          fullName: fullName.trim(),
+          phoneNumber: phoneNumber.trim(),
+          email: identifier.trim() || undefined,
+          password,
+          role,
+          companyName: role === 'OWNER' ? companyName.trim() || undefined : undefined
+        });
+        addNotification(`Code de validation envoyé au ${result.phoneNumber}`, 'info');
+        navigate('/verify-phone', {
+          state: { phoneNumber: result.phoneNumber, devOtpCode: result.devOtpCode }
+        });
+        return;
+      }
 
+      const result = await api.loginWithPassword(identifier.trim(), password);
       login(result.user, result.token);
       finishAuthentication(result.user.role);
     } catch (err: any) {
+      // Compte créé mais numéro non encore vérifié : on enchaîne sur la page dédiée.
+      if (err?.code === 'PHONE_NOT_VERIFIED') {
+        const pendingPhone =
+          (err.payload as { phoneNumber?: string } | undefined)?.phoneNumber || '';
+        navigate('/verify-phone', { state: { phoneNumber: pendingPhone } });
+        return;
+      }
       setErrorMessage(err?.message || 'Authentification impossible. Vérifiez vos informations.');
     } finally {
       setLoading(false);
@@ -176,14 +191,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ mode }) => {
     } finally {
       setLoading(false);
     }
-  };
-
-  /** Super-Admin seeded in Neon by `prisma/seed.ts` — the only guaranteed account. */
-  const fillSuperAdminCredentials = () => {
-    setMethod('PASSWORD');
-    setIdentifier('admin@valleesfleuries.ci');
-    setPassword('VFC_Admin_2026!');
-    resetFeedback();
   };
 
   const inputClass =
@@ -375,7 +382,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ mode }) => {
                             value={identifier}
                             onChange={(e) => setIdentifier(e.target.value)}
                             placeholder={
-                              isRegister ? 'awa.kone@exemple.ci' : 'admin@valleesfleuries.ci'
+                              isRegister ? 'awa.kone@exemple.ci' : 'vous@exemple.ci'
                             }
                             autoComplete={isRegister ? 'email' : 'username'}
                             className={inputClass}
@@ -595,18 +602,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ mode }) => {
                         )}
                       </button>
                     </form>
-                  )}
-
-                  {/* Neon-backed Super-Admin shortcut (the only guaranteed account). */}
-                  {!isRegister && (
-                    <button
-                      type="button"
-                      onClick={fillSuperAdminCredentials}
-                      className="mt-4 w-full flex items-center justify-center gap-2 py-2.5 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/15 text-[11px] font-bold text-emerald-100/80 transition-all"
-                    >
-                      <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-                      Remplir les identifiants Super-Admin
-                    </button>
                   )}
                 </motion.div>
               </AnimatePresence>

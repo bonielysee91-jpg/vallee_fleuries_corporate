@@ -15,12 +15,28 @@
  */
 
 import 'dotenv/config';
+import crypto from 'node:crypto';
 import { UserRole, RentalCategory, PropertyType, PropertyStatus, FurnishingStatus } from '@prisma/client';
 import { hashPassword } from '../src/server/auth.ts';
 import { prisma } from '../src/server/prisma.ts';
 
 /** Shared Unsplash CDN query so every image is delivered pre-optimised. */
 const img = (id: string) => `https://images.unsplash.com/${id}?auto=format&fit=crop&w=1600&q=80`;
+
+/**
+ * Resolve a sample-account password without ever hardcoding a secret in the repo.
+ * The value comes from the given env var; otherwise a random password is generated
+ * and printed once, so no known credential is stored in source control.
+ */
+const resolveSeedPassword = (envKey: string): string => {
+  const provided = process.env[envKey]?.trim();
+  if (provided) return provided;
+  const generated = `VFC-${crypto.randomBytes(9).toString('base64url')}!`;
+  console.warn(
+    `[Seed] ${envKey} non défini — mot de passe aléatoire généré pour cet environnement : ${generated}`
+  );
+  return generated;
+};
 
 /** Validated external images — modern apartments, villas & furnished residences. */
 const IMAGES = {
@@ -42,6 +58,11 @@ export async function seedDatabase() {
   // -------------------------------------------------------------
   // 1. STAFF & SAMPLE ACCOUNTS
   // -------------------------------------------------------------
+  // Passwords are sourced from the environment (never hardcoded in the repo).
+  const adminSeedPassword = resolveSeedPassword('SEED_ADMIN_PASSWORD');
+  const ownerSeedPassword = resolveSeedPassword('SEED_OWNER_PASSWORD');
+  const tenantSeedPassword = resolveSeedPassword('SEED_TENANT_PASSWORD');
+
   const superAdmin = await prisma.user.upsert({
     where: { email: 'admin@valleesfleuries.ci' },
     // Never clobber a password that was rotated in production.
@@ -50,7 +71,7 @@ export async function seedDatabase() {
       email: 'admin@valleesfleuries.ci',
       phoneNumber: '+2250709887766',
       fullName: 'M. Jean-Philippe Brou',
-      passwordHash: hashPassword('VFC_Admin_2026!'),
+      passwordHash: hashPassword(adminSeedPassword),
       role: UserRole.ADMIN,
       companyName: 'Vallées Fleuries Corporate Headquarters',
       isKycVerified: true,
@@ -64,7 +85,7 @@ export async function seedDatabase() {
       email: 'bailleur@valleesfleuries.ci',
       phoneNumber: '+2250707204745',
       fullName: 'Dr. Armand Kouassi',
-      passwordHash: hashPassword('VFC_Bailleur_2026!'),
+      passwordHash: hashPassword(ownerSeedPassword),
       role: UserRole.OWNER,
       companyName: 'Kouassi Patrimoine Immobilier',
       isKycVerified: true,
@@ -78,7 +99,7 @@ export async function seedDatabase() {
       email: 'client@valleesfleuries.ci',
       phoneNumber: '+2250708091011',
       fullName: 'Mme Sarah Koffi',
-      passwordHash: hashPassword('VFC_Client_2026!'),
+      passwordHash: hashPassword(tenantSeedPassword),
       role: UserRole.TENANT,
       isKycVerified: true,
     },

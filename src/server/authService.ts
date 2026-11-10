@@ -75,6 +75,8 @@ export interface CreateUserInput {
   role?: UserRole;
   companyName?: string;
   avatarUrl?: string;
+  /** `false` pour un compte self-service en attente de validation du code SMS. */
+  phoneVerified?: boolean;
 }
 
 export async function createUser(input: CreateUserInput): Promise<PrismaUser> {
@@ -90,7 +92,16 @@ export async function createUser(input: CreateUserInput): Promise<PrismaUser> {
       role: (input.role ?? 'TENANT') as PrismaUser['role'],
       companyName: input.companyName,
       avatarUrl: input.avatarUrl,
+      phoneVerified: input.phoneVerified ?? true,
     },
+  });
+}
+
+/** Marque le numéro comme vérifié après validation du code SMS d'inscription. */
+export async function markPhoneVerified(userId: string): Promise<PrismaUser> {
+  return prisma.user.update({
+    where: { id: userId },
+    data: { phoneVerified: true },
   });
 }
 
