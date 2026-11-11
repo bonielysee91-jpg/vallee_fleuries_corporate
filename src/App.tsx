@@ -38,7 +38,8 @@ const lazyPage = <M, K extends keyof M>(loader: () => Promise<M>, name: K) =>
   });
 
 const HomePage = lazyPage(() => import('./pages/HomePage.tsx'), 'HomePage');
-const AuthPage = lazyPage(() => import('./pages/AuthPage.tsx'), 'AuthPage');
+const LoginPage = lazyPage(() => import('./pages/LoginPage.tsx'), 'LoginPage');
+const RegisterPage = lazyPage(() => import('./pages/RegisterPage.tsx'), 'RegisterPage');
 const InvitationAcceptPage = lazyPage(
   () => import('./pages/InvitationAcceptPage.tsx'),
   'InvitationAcceptPage'
@@ -158,8 +159,8 @@ export default function App() {
         <React.Suspense fallback={<RouteFallback />}>
         <Routes>
           {/* ---------- UNIFIED AUTHENTICATION PORTAL ---------- */}
-          <Route path="/login" element={<AuthPage mode="login" />} />
-          <Route path="/register" element={<AuthPage mode="register" />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
 
           {/* Vérification du numéro après inscription self-service (code SMS). */}
           <Route path="/verify-phone" element={<PhoneVerificationPage />} />
