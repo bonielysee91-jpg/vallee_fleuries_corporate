@@ -234,14 +234,15 @@ export async function revokeSession(sessionId: string): Promise<void> {
  * Deux passerelles possibles, dans cet ordre de priorité :
  *
  * 1. **Orange SMS API** (`ORANGE_SMS_CLIENT_ID` + `ORANGE_SMS_CLIENT_SECRET`, créées
- *    sur developer.orange.com) — l'API officielle pour la Côte d'Ivoire, payable avec
- *    du crédit Orange. Elle couvre les numéros Orange uniquement.
+ *    sur developer.orange.com) — la passerelle A2P officielle de Côte d'Ivoire. Orange
+ *    la documente comme disponible « only in and to Cote d'Ivoire, any operator » : elle
+ *    délivre donc aux numéros Orange (07), MTN (05) **et** Moov (01) du pays.
  * 2. **Passerelle générique** (`SMS_API_URL` + `SMS_API_KEY`) — pour un agrégateur tiers
- *    (Nimba, Semoa, Twilio…) qui, lui, atteint aussi MTN et Moov.
+ *    (Nimba, Semoa, Twilio…) couvrant aussi l'international et les autres réseaux.
  *
  * Tant qu'aucune n'est configurée, aucun SMS n'est émis : hors production le code est
- * renvoyé dans la réponse pour rester testable, en production la requête est refusée
- * explicitement plutôt que d'annoncer un envoi qui n'a pas eu lieu.
+ * journalisé côté serveur (jamais renvoyé au navigateur), en production la requête est
+ * refusée explicitement plutôt que d'annoncer un envoi qui n'a pas eu lieu.
  */
 const ORANGE_SMS_CLIENT_ID = process.env.ORANGE_SMS_CLIENT_ID || '';
 const ORANGE_SMS_CLIENT_SECRET = process.env.ORANGE_SMS_CLIENT_SECRET || '';

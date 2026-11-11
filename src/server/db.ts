@@ -956,6 +956,68 @@ class PrismaRepository {
       })),
     }));
   }
+
+  // ---- ALERTES PERSISTANTES DU COMMAND CENTER ----
+
+  /**
+   * Enregistre une alerte durable pour la cloche admin. Best-effort : l'appelant
+   * isole cette écriture pour qu'un échec ne bloque jamais le parcours client.
+   */
+  public async createAdminNotification(data: {
+    type?: string;
+    propertyId?: string | null;
+    propertyTitle: string;
+    commune?: string | null;
+    clientName?: string | null;
+    clientPhone?: string | null;
+    scheduledDate?: string | null;
+    scheduledTime?: string | null;
+    message: string;
+  }): Promise<void> {
+    await prisma.adminNotification.create({
+      data: {
+        type: data.type ?? 'VISIT',
+        propertyId: data.propertyId ?? null,
+        propertyTitle: data.propertyTitle,
+        commune: data.commune ?? null,
+        clientName: data.clientName ?? null,
+        clientPhone: data.clientPhone ?? null,
+        scheduledDate: data.scheduledDate ?? null,
+        scheduledTime: data.scheduledTime ?? null,
+        message: data.message,
+      },
+    });
+  }
+
+  /** Dernières alertes admin, les plus récentes d'abord. */
+  public async listAdminNotifications(limit = 50) {
+    const rows = await prisma.adminNotification.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: Math.min(200, Math.max(1, limit)),
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      type: row.type,
+      propertyTitle: row.propertyTitle,
+      commune: row.commune ?? '',
+      clientName: row.clientName ?? 'Client',
+      clientPhone: row.clientPhone ?? '',
+      scheduledDate: row.scheduledDate,
+      scheduledTime: row.scheduledTime,
+      message: row.message,
+      read: row.readAt !== null,
+      receivedAt: row.createdAt.toISOString(),
+    }));
+  }
+
+  /** Marque toutes les alertes comme lues ; renvoie le nombre de lignes mises à jour. */
+  public async markAdminNotificationsRead(): Promise<number> {
+    const result = await prisma.adminNotification.updateMany({
+      where: { readAt: null },
+      data: { readAt: new Date() },
+    });
+    return result.count;
+  }
 }
 
 export const db = new PrismaRepository();

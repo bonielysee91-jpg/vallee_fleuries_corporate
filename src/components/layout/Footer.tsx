@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { useAppStore } from '../../store/useAppStore.ts';
 import { Building2, ShieldCheck, Phone, Mail, MapPin, ExternalLink, Check } from 'lucide-react';
 import { VFC_WHATSAPP_URL, VFC_WHATSAPP_DISPLAY } from '../../constants/contact.ts';
@@ -40,6 +41,9 @@ export const Footer: React.FC = () => {
               <li>Yamoussoukro — Habitat & Centre Administratif</li>
               <li>Bouaké — Air France & Belleville</li>
               <li>Assinie — Mafia & France (bord de mer)</li>
+              <li className="pt-1 text-amber-400/90 font-medium">
+                Couverture nationale — 57 villes sur l'ensemble du territoire ivoirien
+              </li>
             </ul>
           </div>
 
@@ -107,9 +111,15 @@ export const Footer: React.FC = () => {
         <div className="pt-8 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 gap-4">
           <p>© 2026 Vallées Fleuries Corporate S.A.S. Tous droits réservés. R.C.M. CI-ABJ-2024-B-14209.</p>
           <div className="flex items-center gap-6">
-            <span className="hover:text-slate-400 cursor-pointer">Conditions Générales</span>
-            <span className="hover:text-slate-400 cursor-pointer">Barème Honoraires Agence</span>
-            <span className="hover:text-slate-400 cursor-pointer">Confidentialité & Données</span>
+            <Link to="/legal/conditions" className="hover:text-slate-300 transition-colors">
+              Conditions Générales
+            </Link>
+            <Link to="/legal/honoraires" className="hover:text-slate-300 transition-colors">
+              Barème Honoraires Agence
+            </Link>
+            <Link to="/legal/confidentialite" className="hover:text-slate-300 transition-colors">
+              Confidentialité & Données
+            </Link>
           </div>
         </div>
       </div>

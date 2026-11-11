@@ -1189,6 +1189,23 @@ async function notifyAdminsOfNewVisit(visit: any): Promise<void> {
 
   broadcastToAdmins('visit:new', payload);
 
+  // Persistance : la cloche recharge ces alertes même si aucun admin n'était connecté.
+  try {
+    await db.createAdminNotification({
+      type: 'VISIT',
+      propertyId: visit.propertyId ?? null,
+      propertyTitle: payload.propertyTitle,
+      commune: payload.commune,
+      clientName: payload.clientName,
+      clientPhone: payload.clientPhone,
+      scheduledDate: payload.scheduledDate,
+      scheduledTime: payload.scheduledTime,
+      message: payload.message,
+    });
+  } catch (error: any) {
+    console.error("[Visits] Persistance de l'alerte admin :", error?.message ?? error);
+  }
+
   if (!isMailConfigured()) return;
 
   try {
@@ -2205,6 +2222,36 @@ app.get('/api/admin/transactions', authenticateJWT, requireRole(['ADMIN']), asyn
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+/** Alertes persistantes du Command Center (cloche admin), les plus récentes d'abord. */
+app.get('/api/admin/notifications', authenticateJWT, requireRole(['ADMIN']), async (_req, res) => {
+  try {
+    const notifications = await db.listAdminNotifications();
+    res.json({
+      success: true,
+      count: notifications.length,
+      unread: notifications.filter((item) => !item.read).length,
+      data: notifications,
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/** Marque toutes les alertes admin comme lues (badge de la cloche remis à zéro). */
+app.post(
+  '/api/admin/notifications/read',
+  authenticateJWT,
+  requireRole(['ADMIN']),
+  async (_req, res) => {
+    try {
+      const updated = await db.markAdminNotificationsRead();
+      res.json({ success: true, updated });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  }
+);
 
 app.get('/api/admin/audit-logs', authenticateJWT, requireRole(['ADMIN']), async (req, res) => {
   try {

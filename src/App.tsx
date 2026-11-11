@@ -57,6 +57,7 @@ const SystemArchitecturePage = lazyPage(
   () => import('./pages/SystemArchitecturePage.tsx'),
   'SystemArchitecturePage'
 );
+const LegalPage = lazyPage(() => import('./pages/LegalPage.tsx'), 'LegalPage');
 
 const PropertyWizardPage = lazyPage(
   () => import('./pages/dashboard/PropertyWizardPage.tsx'),
@@ -184,6 +185,9 @@ export default function App() {
 
             {/* Live Neon PostgreSQL schema readout — reachable at its own URL, never linked publicly. */}
             <Route path="/architecture" element={<SystemArchitecturePage />} />
+
+            {/* Pages réglementaires liées depuis le pied de page. */}
+            <Route path="/legal/:section" element={<LegalPage />} />
 
             {/* ---------- CLIENT SPACE (TENANT | OWNER | ADMIN) ---------- */}
             <Route

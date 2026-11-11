@@ -2,21 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Bell, BellRing, CalendarClock, CheckCheck, Phone, Wifi, WifiOff } from 'lucide-react';
 import { io, Socket } from 'socket.io-client';
 import { useAppStore } from '../../store/useAppStore.ts';
+import { api } from '../../services/api.ts';
+import { AdminNotification } from '../../types/index.ts';
 
-/** Alerte poussée par le serveur sur le canal temps réel Socket.io. */
-interface VisitNotification {
-  id: string;
-  propertyTitle: string;
-  commune: string;
-  clientName: string;
-  clientPhone: string;
-  scheduledDate: string | null;
-  scheduledTime: string | null;
-  message: string;
-  receivedAt: string;
-}
-
-/** Nombre maximal d'alertes conservées en mémoire à l'écran. */
+/** Nombre maximal d'alertes conservées à l'écran. */
 const MAX_ITEMS = 30;
 
 function formatRelativeTime(iso: string): string {
@@ -36,12 +25,31 @@ function formatRelativeTime(iso: string): string {
 export const AdminNotificationBell: React.FC = () => {
   const addNotification = useAppStore((state) => state.addNotification);
 
-  const [items, setItems] = useState<VisitNotification[]>([]);
+  const [items, setItems] = useState<AdminNotification[]>([]);
   const [unread, setUnread] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
 
   const socketRef = useRef<Socket | null>(null);
+
+  // Historique persistant : la cloche affiche les alertes déjà enregistrées en base,
+  // même si aucun administrateur n'était connecté au moment de la demande.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .adminGetNotifications()
+      .then((rows) => {
+        if (cancelled) return;
+        setItems(rows.slice(0, MAX_ITEMS));
+        setUnread(rows.filter((row) => !row.read).length);
+      })
+      .catch(() => {
+        /* Best-effort : la cloche reste fonctionnelle en temps réel même si l'historique échoue. */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     // Connexion à la même origine que l'application ; le cookie httpOnly de session
@@ -52,9 +60,9 @@ export const AdminNotificationBell: React.FC = () => {
     socket.on('connect', () => setIsConnected(true));
     socket.on('disconnect', () => setIsConnected(false));
 
-    socket.on('visit:new', (payload: VisitNotification) => {
+    socket.on('visit:new', (payload: AdminNotification) => {
       if (!payload) return;
-      setItems((prev) => [payload, ...prev].slice(0, MAX_ITEMS));
+      setItems((prev) => [{ ...payload, read: false }, ...prev].slice(0, MAX_ITEMS));
       setUnread((prev) => prev + 1);
       addNotification(payload.message || 'Nouvelle demande de visite', 'info');
     });
@@ -66,16 +74,22 @@ export const AdminNotificationBell: React.FC = () => {
     };
   }, [addNotification]);
 
-  const handleToggle = () => {
-    setIsOpen((prev) => {
-      const next = !prev;
-      if (next) setUnread(0);
-      return next;
+  /** Marque localement les alertes comme lues et persiste l'état en base. */
+  const persistRead = () => {
+    setUnread(0);
+    setItems((prev) => prev.map((item) => ({ ...item, read: true })));
+    void api.adminMarkNotificationsRead().catch(() => {
+      /* Échec silencieux : l'affichage reste correct, seule la persistance est différée. */
     });
   };
 
+  const handleToggle = () => {
+    if (!isOpen) persistRead();
+    setIsOpen(!isOpen);
+  };
+
   const handleMarkAllRead = () => {
-    setUnread(0);
+    persistRead();
     setIsOpen(false);
   };
 

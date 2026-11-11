@@ -8,6 +8,7 @@ import {
   Transaction,
   QuittanceLoyer,
   MoveInCostBreakdown,
+  AdminNotification,
   User,
   UserRole
 } from '../types/index.ts';
@@ -640,6 +641,20 @@ export const api = {
   async adminGetStats(): Promise<AdminStats> {
     const json = await request<{ data: AdminStats }>('/admin/stats');
     return json.data;
+  },
+
+  /** Alertes persistantes de la cloche admin (Command Center), les plus récentes d'abord. */
+  async adminGetNotifications(): Promise<AdminNotification[]> {
+    const json = await request<{ data: AdminNotification[] }>('/admin/notifications');
+    return json.data;
+  },
+
+  /** Marque toutes les alertes admin comme lues ; renvoie le nombre de lignes mises à jour. */
+  async adminMarkNotificationsRead(): Promise<number> {
+    const json = await request<{ updated: number }>('/admin/notifications/read', {
+      method: 'POST'
+    });
+    return json.updated;
   },
 
   // -----------------------------------------------------------

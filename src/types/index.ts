@@ -355,3 +355,18 @@ export interface FilterState {
   hasSecurity247?: boolean;
   hasSwimmingPool?: boolean;
 }
+
+/** Alerte persistante du Command Center, rechargée par la cloche admin. */
+export interface AdminNotification {
+  id: string;
+  type: string;
+  propertyTitle: string;
+  commune: string;
+  clientName: string;
+  clientPhone: string;
+  scheduledDate: string | null;
+  scheduledTime: string | null;
+  message: string;
+  read: boolean;
+  receivedAt: string;
+}

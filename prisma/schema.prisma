@@ -500,6 +500,27 @@ model AuditLog {
   @@index([createdAt])
 }
 
+// Alertes persistantes du Command Center (cloche admin). Contrairement aux alertes
+// temps réel diffusées par Socket.io, elles survivent au rechargement de page et à
+// l'absence d'administrateur connecté au moment de l'événement.
+model AdminNotification {
+  id            String    @id @default(uuid())
+  type          String    @default("VISIT") // VISIT, PAYMENT, MODERATION…
+  propertyId    String?   // Référence souple, sans clé étrangère : survit à la suppression du bien
+  propertyTitle String
+  commune       String?
+  clientName    String?
+  clientPhone   String?
+  scheduledDate String?
+  scheduledTime String?
+  message       String
+  readAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([createdAt])
+  @@index([readAt])
+}
+
 // System Settings & Feature Flags
 model SystemSetting {
   id          String   @id @default(uuid())
