@@ -45,6 +45,7 @@ const initialsOf = (fullName: string): string =>
 /** `/admin/users` — account management, role assignment and bans. */
 export const AdminUsersPage: React.FC = () => {
   const addNotification = useAppStore((state) => state.addNotification);
+  const openConfirmation = useAppStore((state) => state.openConfirmation);
 
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [page, setPage] = useState(1);
@@ -105,30 +106,52 @@ export const AdminUsersPage: React.FC = () => {
     }
   };
 
-  const handleToggleBan = async (user: AdminUser) => {
+  const handleToggleBan = (user: AdminUser) => {
     const isBanned = Boolean(user.isBanned);
-    let reason: string | undefined;
-    if (!isBanned) {
-      const input = window.prompt('Motif du bannissement (optionnel)');
-      if (input === null) return;
-      reason = input.trim() || undefined;
-    }
-    setBusyId(user.id);
-    try {
-      const updated = await api.adminSetUserBan(user.id, !isBanned, reason);
-      setUsers((prev) =>
-        prev.map((item) =>
-          item.id === user.id ? { ...item, ...updated, isBanned: !isBanned } : item
-        )
-      );
-      addNotification(
-        isBanned ? `${updated.fullName} a été réactivé` : `${updated.fullName} a été suspendu`,
-        'success'
-      );
-    } catch (err: any) {
-      addNotification(err?.message || 'Action impossible sur ce compte', 'error');
-    } finally {
-      setBusyId(null);
+
+    if (isBanned) {
+      openConfirmation({
+        title: 'Réactiver le compte',
+        message: `Voulez-vous réactiver le compte de « ${user.fullName} » (${user.phoneNumber}) ?\nL'utilisateur pourra à nouveau se connecter et accéder à ses services.`,
+        confirmLabel: 'Réactiver le compte',
+        variant: 'info',
+        onConfirm: async () => {
+          setBusyId(user.id);
+          try {
+            const updated = await api.adminSetUserBan(user.id, false);
+            setUsers((prev) =>
+              prev.map((item) => (item.id === user.id ? { ...item, ...updated, isBanned: false } : item))
+            );
+            addNotification(`${updated.fullName} a été réactivé avec succès`, 'success');
+          } catch (err: any) {
+            addNotification(err?.message || 'Réactivation impossible', 'error');
+          } finally {
+            setBusyId(null);
+          }
+        }
+      });
+    } else {
+      openConfirmation({
+        title: 'Suspendre le compte',
+        message: `Voulez-vous suspendre l'accès de « ${user.fullName} » ?\nCette sanction déconnectera ses sessions en cours. Vous pouvez spécifier un motif :`,
+        confirmLabel: 'Suspendre le compte',
+        variant: 'danger',
+        inputPlaceholder: 'Motif de la suspension (ex: Signalement abus, impayé)',
+        onConfirm: async (reason) => {
+          setBusyId(user.id);
+          try {
+            const updated = await api.adminSetUserBan(user.id, true, reason?.trim() || undefined);
+            setUsers((prev) =>
+              prev.map((item) => (item.id === user.id ? { ...item, ...updated, isBanned: true } : item))
+            );
+            addNotification(`${updated.fullName} a été suspendu`, 'success');
+          } catch (err: any) {
+            addNotification(err?.message || 'Suspension impossible', 'error');
+          } finally {
+            setBusyId(null);
+          }
+        }
+      });
     }
   };
 

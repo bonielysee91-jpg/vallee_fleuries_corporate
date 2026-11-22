@@ -1,13 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { useAppStore } from '../../store/useAppStore.ts';
+import { useShallow } from 'zustand/react/shallow';
 import { api } from '../../services/api.ts';
-import { Search, MapPin, Building, ShieldCheck, Sparkles, CheckCircle2 } from 'lucide-react';
+import { Search, MapPin, Building, Sparkles } from 'lucide-react';
 import { RentalCategory, City } from '../../types/index.ts';
 import { VFC_MEDIA } from '../../constants/media.ts';
 import { PROPERTY_TYPE_OPTIONS } from '../../constants/property.ts';
 
 export const HeroSection: React.FC = () => {
-  const { setFilters, setView } = useAppStore();
+  const { setFilters, setView } = useAppStore(useShallow((s) => ({
+    setFilters: s.setFilters,
+    setView: s.setView,
+  })));
   const [category, setCategory] = useState<RentalCategory | 'ALL'>('ALL');
   const [commune, setCommune] = useState('ALL');
   const [budgetMax, setBudgetMax] = useState('ALL');
@@ -23,7 +27,7 @@ export const HeroSection: React.FC = () => {
     setFilters({
       category,
       commune,
-      maxPrice: budgetMax === 'ALL' ? 15000000 : Number(budgetMax)
+      maxPrice: budgetMax === 'ALL' ? undefined : Number(budgetMax)
     });
     setView('properties');
   };
@@ -49,16 +53,12 @@ export const HeroSection: React.FC = () => {
         <div className="space-y-4 max-w-3xl mx-auto">
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full liquid-glass-dark text-amber-300 text-xs font-semibold tracking-wide border border-amber-400/20 shadow-lg">
             <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            <span>L'Immobilier de Prestige Ivoirien · Vente & Location de Maisons</span>
+            <span>Votre Projet Immobilier en Toute Confiance • Expertises & Opportunités Rares</span>
           </div>
 
           <h1 className="text-3xl sm:text-5xl lg:text-6xl font-extrabold text-white font-serif tracking-tight leading-[1.12] text-balance">
             Trouvez la maison idéale, à l'achat ou à la location.
           </h1>
-
-          <p className="text-sm sm:text-base text-slate-200/90 font-normal max-w-2xl mx-auto leading-relaxed">
-            Villas de prestige à Cocody, penthouses d'affaires au Plateau, duplex contemporains en Zone 4 et maisons pieds dans l'eau à Assinie — à vendre et à louer.
-          </p>
         </div>
 
         {/* Liquid Glass Dynamic Multi-Filter Bar */}
@@ -68,8 +68,8 @@ export const HeroSection: React.FC = () => {
           <div className="flex items-center justify-center gap-2 mb-4 overflow-x-auto pb-1">
             {[
               { id: 'ALL', label: 'Toutes les maisons' },
-              { id: 'SALE', label: 'À Vendre' },
-              { id: 'LONG_TERM_RENT', label: 'À Louer' },
+              { id: 'SALE', label: 'Vente' },
+              { id: 'LONG_TERM_RENT', label: 'Location' },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -146,12 +146,13 @@ export const HeroSection: React.FC = () => {
                   className="w-full bg-transparent text-xs font-semibold text-slate-800 focus:outline-none cursor-pointer"
                 >
                   <option value="ALL">Sans limite de budget</option>
-                  <option value="300000">Jusqu'à 300 000 FCFA</option>
-                  <option value="750000">Jusqu'à 750 000 FCFA</option>
+                  <option value="500000">Jusqu'à 500 000 FCFA</option>
                   <option value="1500000">Jusqu'à 1 500 000 FCFA</option>
-                  <option value="3000000">Jusqu'à 3 000 000 FCFA</option>
-                  <option value="6000000">Jusqu'à 6 000 000 FCFA</option>
-                  <option value="10000000">Plus de 10 000 000 FCFA</option>
+                  <option value="5000000">Jusqu'à 5 000 000 FCFA</option>
+                  <option value="20000000">Jusqu'à 20 000 000 FCFA</option>
+                  <option value="50000000">Jusqu'à 50 000 000 FCFA</option>
+                  <option value="100000000">Jusqu'à 100 000 000 FCFA</option>
+                  <option value="200000000">Jusqu'à 200 000 000 FCFA</option>
                 </select>
               </div>
             </div>
@@ -168,24 +169,7 @@ export const HeroSection: React.FC = () => {
 
         </div>
 
-        {/* Reassuring Pillars Under Search */}
-        <div className="flex flex-wrap items-center justify-center gap-6 sm:gap-10 text-xs text-slate-200/85">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>Vente & Location · Dossiers et actes sécurisés</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0" />
-            <span>Paiements Sécurisés Wave & Orange Money</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>Baux & Actes de Vente Numérisés</span>
-          </div>
-        </div>
-
       </div>
-
     </section>
   );
 };

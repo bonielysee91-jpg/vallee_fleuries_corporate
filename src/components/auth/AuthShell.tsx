@@ -1,12 +1,12 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Building2, ShieldCheck } from 'lucide-react';
+import { ShieldCheck } from 'lucide-react';
 
 /** Arguments de valeur répétés sur les deux écrans du portail. */
 const SOCIAL_PROOF: string[] = [
   'Baux certifiés Loi CI 2019-576',
-  'Paiement Wave · Orange · MTN · Moov',
-  'Quittances numériques vérifiables'
+  'Annonces vérifiées & visites accompagnées',
+  'Accompagnement juridique des actes'
 ];
 
 /** Habillage commun des champs de saisie du portail (style « Liquid Glass »). */
@@ -43,14 +43,12 @@ export const AuthShell: React.FC<AuthShellProps> = ({ children, footer }) => {
         {/* Editorial brand column (desktop) */}
         <div className="hidden lg:flex flex-col justify-between p-14">
           <Link to="/" className="inline-flex items-center gap-3 group">
-            <span className="w-11 h-11 rounded-2xl bg-white/10 border border-amber-400/40 backdrop-blur-xl flex items-center justify-center">
-              <Building2 className="w-5 h-5 text-amber-400" />
-            </span>
-            <span className="leading-tight">
-              <span className="block font-serif text-lg font-bold">Vallées Fleuries</span>
-              <span className="block text-[10px] font-black uppercase tracking-[0.28em] text-amber-400">
-                Corporate
-              </span>
+            <span className="inline-flex items-center justify-center rounded-2xl bg-white p-1 shadow-lg">
+              <img
+                src="/atar.jpg"
+                alt="Vallées Fleuries Corporate"
+                className="h-9 w-auto object-contain"
+              />
             </span>
           </Link>
 
@@ -84,10 +82,13 @@ export const AuthShell: React.FC<AuthShellProps> = ({ children, footer }) => {
           <div className="w-full max-w-md">
             {/* Mobile brand mark */}
             <Link to="/" className="lg:hidden inline-flex items-center gap-2.5 mb-6">
-              <span className="w-9 h-9 rounded-xl bg-white/10 border border-amber-400/40 backdrop-blur-xl flex items-center justify-center">
-                <Building2 className="w-4 h-4 text-amber-400" />
+              <span className="inline-flex items-center justify-center rounded-xl bg-white p-1 shadow-lg">
+                <img
+                  src="/atar.jpg"
+                  alt="Vallées Fleuries Corporate"
+                  className="h-8 w-auto object-contain"
+                />
               </span>
-              <span className="font-serif text-base font-bold">Vallées Fleuries Corporate</span>
             </Link>
 
             <div className="backdrop-blur-2xl bg-white/10 dark:bg-emerald-950/40 border border-white/20 shadow-2xl rounded-3xl p-6 sm:p-8">

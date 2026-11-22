@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../../store/useAppStore.ts';
-import { useAuth } from '../auth/AuthProvider.tsx';
+import { useShallow } from 'zustand/react/shallow';
+import { useAuth } from '../auth/useAuth.ts';
 import { VFC_WHATSAPP_URL, VFC_WHATSAPP_MESSAGE } from '../../constants/contact.ts';
 import {
-  Building2,
   Heart,
   ChevronDown,
   Sparkles,
@@ -16,6 +16,7 @@ import {
   KeyRound,
   Settings,
   MessageCircle,
+  UserPlus,
 } from 'lucide-react';
 
 /**
@@ -24,7 +25,7 @@ import {
  *  · Mobile  (<768px) : frosted bar with only the VFC wordmark, an active
  *                       WhatsApp concierge button and the user avatar.
  *  · Tablet  (768-1024): wordmark + hamburger drawer (secondary links live there).
- *  · Desktop (>1024px): wordmark, « Accueil / Nos Biens / À Vendre / À Louer »,
+ *  · Desktop (>1024px): wordmark, « Accueil / Nos Biens / Vente / Location »,
  *                       WhatsApp action, FCFA currency badge and the profile menu.
  *
  * No search input lives in the header: searching belongs to the catalogue page
@@ -32,7 +33,15 @@ import {
  */
 export const DynamicHeader: React.FC = () => {
   const navigate = useNavigate();
-  const { currentView, favorites, filters, resetFilters, setFilters, openTabletDrawer } = useAppStore();
+  const { currentView, favorites, filters, resetFilters, setFilters, openTabletDrawer } =
+    useAppStore(useShallow((s) => ({
+      currentView: s.currentView,
+      favorites: s.favorites,
+      filters: s.filters,
+      resetFilters: s.resetFilters,
+      setFilters: s.setFilters,
+      openTabletDrawer: s.openTabletDrawer,
+    })));
   const { currentUser, isAdmin, isOwner, adminPreviewMode, toggleAdminPreview, logout } = useAuth();
 
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -68,31 +77,33 @@ export const DynamicHeader: React.FC = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 sm:h-20 flex items-center justify-between gap-4">
 
         {/* Left: Brand Logo & Wordmark */}
-        <button
-          onClick={() => {
+        <a
+          href="/"
+          onClick={(e) => {
+            e.preventDefault();
             resetFilters();
             navigate('/');
           }}
-          className="flex items-center gap-3 text-left group cursor-pointer focus-visible:outline-none shrink-0"
+          className="flex items-center gap-3.5 group shrink-0"
         >
-          <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-br from-emerald-950 via-emerald-900 to-emerald-800 flex items-center justify-center text-amber-400 shadow-md group-hover:scale-105 transition-transform duration-300 border border-amber-400/20">
-            <Building2 className="w-5 h-5 sm:w-6 sm:h-6 stroke-[2.2]" />
+          {/* Logo VFC complet (icône + texte), affiché sans recadrage */}
+          <div className="flex items-center shrink-0">
+            <img
+              src="/atar.jpg"
+              onError={(e) => {
+                if (e.currentTarget.src.endsWith('/atar.jpg')) {
+                  e.currentTarget.src = '/atar.svg';
+                } else if (e.currentTarget.src.endsWith('/atar.svg')) {
+                  e.currentTarget.src = '/atar.png';
+                } else if (e.currentTarget.src.endsWith('/atar.png')) {
+                  e.currentTarget.src = '/atar.jpeg';
+                }
+              }}
+              alt="Vallées Fleuries Corporate"
+              className="h-12 sm:h-16 w-auto object-contain"
+            />
           </div>
-          <div className="flex flex-col">
-            <span className="text-lg sm:text-xl font-bold tracking-tight text-emerald-950 font-serif leading-none">
-              Vallées Fleuries
-            </span>
-            <div className="hidden sm:flex items-center gap-1.5 mt-1">
-              <span className="text-[10px] uppercase tracking-widest font-bold text-emerald-800">
-                Corporate
-              </span>
-              <span className="w-1 h-1 rounded-full bg-amber-500" />
-              <span className="text-[10px] text-slate-500 font-medium">
-                Vente & Location
-              </span>
-            </div>
-          </div>
-        </button>
+        </a>
 
         {/* Center: Primary rental navigation (Desktop only) */}
         <nav className="hidden lg:flex items-center gap-7 text-sm font-medium text-slate-700">
@@ -103,6 +114,24 @@ export const DynamicHeader: React.FC = () => {
             }`}
           >
             Accueil
+          </button>
+
+          <button
+            onClick={() => navigate('/avant-propos')}
+            className={`whitespace-nowrap transition-colors py-1 cursor-pointer hover:text-emerald-900 ${
+              currentView === 'avant-propos' ? 'text-emerald-900 font-bold border-b-2 border-emerald-700' : ''
+            }`}
+          >
+            À propos
+          </button>
+
+          <button
+            onClick={() => navigate('/services')}
+            className={`whitespace-nowrap transition-colors py-1 cursor-pointer hover:text-emerald-900 ${
+              currentView === 'services' ? 'text-emerald-900 font-bold border-b-2 border-emerald-700' : ''
+            }`}
+          >
+            Nos Services
           </button>
 
           <button
@@ -125,7 +154,7 @@ export const DynamicHeader: React.FC = () => {
             }`}
           >
             <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-            <span>À Vendre</span>
+            <span>Vente</span>
           </button>
 
           <button
@@ -137,7 +166,7 @@ export const DynamicHeader: React.FC = () => {
             }`}
           >
             <KeyRound className="w-3.5 h-3.5 text-emerald-700" />
-            <span>À Louer</span>
+            <span>Location</span>
           </button>
         </nav>
 
@@ -232,7 +261,13 @@ export const DynamicHeader: React.FC = () => {
               </button>
 
               {isUserMenuOpen && (
-                <div className="absolute right-0 mt-2 w-60 bg-white rounded-2xl shadow-2xl border border-slate-100 p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setIsUserMenuOpen(false)}
+                    aria-hidden="true"
+                  />
+                  <div className="absolute right-0 mt-2 w-60 bg-white rounded-2xl shadow-2xl border border-slate-100 p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
                   <div className="px-3 py-2 border-b border-slate-100">
                     <div className="text-xs font-bold text-slate-900">{currentUser.fullName}</div>
                     <div className="text-[11px] text-emerald-700 font-medium">{currentUser.phoneNumber}</div>
@@ -313,15 +348,26 @@ export const DynamicHeader: React.FC = () => {
                     </button>
                   </div>
                 </div>
+              </>
               )}
             </div>
           ) : (
-            <button
-              onClick={() => navigate('/login')}
-              className="px-4 py-2 rounded-full bg-gradient-to-r from-emerald-900 to-emerald-800 text-amber-400 font-bold text-xs border border-amber-400/40 hover:scale-105 active:scale-95 transition-all shadow-sm"
-            >
-              Connexion
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => navigate('/register')}
+                title="Créer un compte"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-white/90 border border-emerald-800/30 text-emerald-900 font-bold text-xs hover:bg-emerald-50 hover:border-emerald-700 active:scale-95 transition-all shadow-sm"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Inscription</span>
+              </button>
+              <button
+                onClick={() => navigate('/login')}
+                className="px-4 py-2 rounded-full bg-gradient-to-r from-emerald-900 to-emerald-800 text-amber-400 font-bold text-xs border border-amber-400/40 hover:scale-105 active:scale-95 transition-all shadow-sm"
+              >
+                Connexion
+              </button>
+            </div>
           )}
 
         </div>

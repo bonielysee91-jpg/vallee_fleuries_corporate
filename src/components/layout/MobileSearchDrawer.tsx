@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAppStore } from '../../store/useAppStore.ts';
+import { useShallow } from 'zustand/react/shallow';
 import { api } from '../../services/api.ts';
 import { X, Search, SlidersHorizontal, MapPin, Building, KeyRound, Check } from 'lucide-react';
 import { PropertyType } from '../../types/index.ts';
@@ -13,7 +14,14 @@ export const MobileSearchDrawer: React.FC = () => {
     setFilters, 
     resetFilters,
     setView 
-  } = useAppStore();
+  } = useAppStore(useShallow((s) => ({
+    isMobileSearchOpen: s.isMobileSearchOpen,
+    closeMobileSearch: s.closeMobileSearch,
+    filters: s.filters,
+    setFilters: s.setFilters,
+    resetFilters: s.resetFilters,
+    setView: s.setView,
+  })));
 
   const [communes, setCommunes] = useState<string[]>(['ALL']);
 
@@ -93,7 +101,7 @@ export const MobileSearchDrawer: React.FC = () => {
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                À Vendre
+                Vente
               </button>
               <button
                 onClick={() => setFilters({ category: 'LONG_TERM_RENT' })}
@@ -103,7 +111,7 @@ export const MobileSearchDrawer: React.FC = () => {
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                À Louer
+                Location
               </button>
             </div>
           </div>

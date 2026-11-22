@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { useAuth } from '../components/auth/AuthProvider.tsx';
+import { useAuth } from '../components/auth/useAuth.ts';
 import { useAppStore } from '../store/useAppStore.ts';
 import { api } from '../services/api.ts';
 import { landingPathForRole } from '../router/navigation.ts';
 import {
-  Building2,
   KeyRound,
   User as UserIcon,
   Smartphone,
@@ -84,10 +83,13 @@ export const InvitationAcceptPage: React.FC = () => {
       <div className="relative z-10 min-h-screen flex items-center justify-center p-5 sm:p-8">
         <div className="w-full max-w-md">
           <Link to="/" className="inline-flex items-center gap-2.5 mb-6">
-            <span className="w-9 h-9 rounded-xl bg-white/10 border border-amber-400/40 backdrop-blur-xl flex items-center justify-center">
-              <Building2 className="w-4 h-4 text-amber-400" />
+            <span className="inline-flex items-center justify-center rounded-xl bg-white p-1 shadow-lg">
+              <img
+                src="/atar.jpg"
+                alt="Vallées Fleuries Corporate"
+                className="h-8 w-auto object-contain"
+              />
             </span>
-            <span className="font-serif text-base font-bold">Vallées Fleuries Corporate</span>
           </Link>
 
           <motion.div

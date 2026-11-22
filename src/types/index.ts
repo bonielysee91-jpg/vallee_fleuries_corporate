@@ -15,8 +15,6 @@ export type ListingCategory =
   | 'LONG_TERM_RENT'        // Location Longue Durée (Bail 1 an+)
   | 'SHORT_TERM_FURNISHED'; // Héritage (retirée du catalogue public)
 
-export type TransactionCategory = ListingCategory;
-
 /** Alias historique conservé pour les modules encore nommés « rental ». */
 export type RentalCategory = ListingCategory;
 
@@ -41,26 +39,6 @@ export type PropertyStatus =
   | 'PENDING_REVIEW'
   | 'PUBLISHED'
   | 'RENTED';
-
-export type PaymentMethod = 
-  | 'WAVE'
-  | 'ORANGE_MONEY'
-  | 'MTN_MOMO'
-  | 'MOOV_MONEY'
-  | 'CARD_CINETPAY'
-  | 'CARD_PAYSTACK'
-  | 'VISA_MASTERCARD'
-  | 'BANK_TRANSFER';
-
-export type TransactionStatus = 'PENDING' | 'PROCESSING' | 'SUCCESSFUL' | 'COMPLETED' | 'FAILED' | 'REFUNDED';
-
-export type TransactionPurpose = 
-  | 'SHORT_STAY_BOOKING'
-  | 'MOVE_IN_PACKAGE'
-  | 'MONTHLY_RENT'
-  | 'VISIT_FEE'
-  | 'SECURITY_DEPOSIT'
-  | string;
 
 export type VisitType = 'IN_PERSON' | 'VIRTUAL_3D' | 'PHYSICAL' | 'VIDEO_CALL';
 export type VisitStatus = 'PENDING' | 'CONFIRMED' | 'CANCELLED' | 'COMPLETED';
@@ -241,7 +219,6 @@ export interface Booking {
   totalAmountFcfa: number;
   status: BookingStatus;
   specialRequests?: string;
-  paymentMethod?: PaymentMethod;
   createdAt: string;
 }
 
@@ -289,54 +266,10 @@ export interface VisitAppointment {
   visitType?: VisitType;
   status: VisitStatus;
   notes?: string;
+  adminMessage?: string;
   whatsAppNotifyUrl?: string;
   createdAt: string;
 }
-
-export interface Transaction {
-  id: string;
-  reference: string;
-  amountFcfa: number;
-  feeFcfa: number;
-  netAmountFcfa: number;
-  currency: 'XOF' | 'FCFA';
-  paymentMethod: PaymentMethod;
-  paymentProvider?: string;
-  purpose: TransactionPurpose;
-  status: TransactionStatus;
-  payerPhone: string;
-  payerName: string;
-  clientName?: string;
-  clientPhone?: string;
-  propertyTitle?: string;
-  createdAt: string;
-}
-
-export interface QuittanceLoyer {
-  id: string;
-  quittanceNumber: string;
-  month: string;
-  periodMonth?: string;
-  year: number;
-  tenantName: string;
-  tenantPhone: string;
-  ownerName: string;
-  landlordName?: string;
-  propertyTitle: string;
-  propertyAddress: string;
-  commune: string;
-  rentAmountFcfa: number;
-  baseRentFcfa?: number;
-  chargesFcfa: number;
-  totalPaidFcfa: number;
-  paymentDate: string;
-  paymentMethod: PaymentMethod;
-  transactionReference: string;
-  qrCodeVerificationUrl: string;
-}
-
-// Alias for backwards compatibility
-export type RentQuittance = QuittanceLoyer;
 
 export interface FilterState {
   category?: ListingCategory | 'ALL';

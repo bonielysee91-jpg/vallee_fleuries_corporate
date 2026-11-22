@@ -9,7 +9,7 @@
 import crypto from 'node:crypto';
 import nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
-import { prisma } from './prisma.ts';
+import { prisma, withConnectionRetry } from './prisma.ts';
 import type { Prisma, User as PrismaUser, AdminInvitation } from '@prisma/client';
 import { User, UserRole } from '../types/index.ts';
 import { comparePassword, hashPassword, sanitizeIvorianPhone } from './auth.ts';
@@ -75,7 +75,7 @@ export interface CreateUserInput {
   role?: UserRole;
   companyName?: string;
   avatarUrl?: string;
-  /** `false` pour un compte self-service en attente de validation du code SMS. */
+  /** Considéré comme vérifié par défaut : aucune validation par SMS n'est requise. */
   phoneVerified?: boolean;
 }
 
@@ -97,14 +97,6 @@ export async function createUser(input: CreateUserInput): Promise<PrismaUser> {
   });
 }
 
-/** Marque le numéro comme vérifié après validation du code SMS d'inscription. */
-export async function markPhoneVerified(userId: string): Promise<PrismaUser> {
-  return prisma.user.update({
-    where: { id: userId },
-    data: { phoneVerified: true },
-  });
-}
-
 /* ------------------------------------------------------------------ */
 /* Bootstrap du compte Super-Admin (Direction Générale)                */
 /* ------------------------------------------------------------------ */
@@ -122,7 +114,7 @@ export async function ensureBootstrapAdmin(): Promise<void> {
   const email = process.env.ADMIN_EMAIL?.trim().toLowerCase() ?? '';
   const password = process.env.ADMIN_PASSWORD ?? '';
   const phoneNumber = process.env.ADMIN_PHONE?.trim() ?? '';
-  const fullName = process.env.ADMIN_FULLNAME?.trim() || 'Direction Générale VFC';
+  const fullName = process.env.ADMIN_FULLNAME?.trim() || 'BONI ELYSEE';
 
   // Bootstrap désactivé tant que la configuration n'est pas renseignée.
   if (!email && !password && !phoneNumber) return;
@@ -138,19 +130,48 @@ export async function ensureBootstrapAdmin(): Promise<void> {
     return;
   }
 
+  // Une indisponibilité réseau transitoire de Neon ne doit pas laisser le portail
+  // admin injoignable : on rejoue le provisionnement (idempotent) avant d'abandonner.
+  await withConnectionRetry(
+    () => provisionBootstrapAdmin({ email, password, phoneNumber, fullName }),
+    4,
+    1_000
+  );
+}
+
+/**
+ * Provisionnement effectif du compte Super-Admin. Idempotent et non destructif :
+ * un compte privilégié disposant déjà d'un mot de passe est laissé intact.
+ */
+async function provisionBootstrapAdmin(config: {
+  email: string;
+  password: string;
+  phoneNumber: string;
+  fullName: string;
+}): Promise<void> {
+  const { email, password, phoneNumber, fullName } = config;
+
   const existing = await findUserByIdentifier(email);
 
   if (existing) {
     const alreadyPrivileged = existing.role === 'ADMIN' || existing.role === 'SUPER_ADMIN';
     if (alreadyPrivileged && existing.passwordHash) {
-      console.log(`[Bootstrap Admin] Compte Super-Admin déjà opérationnel (${email}).`);
+      if (existing.fullName !== fullName) {
+        await prisma.user.update({
+          where: { id: existing.id },
+          data: { fullName },
+        });
+        console.log(`[Bootstrap Admin] Nom du Super-Admin actualisé : ${fullName} (${email}).`);
+      } else {
+        console.log(`[Bootstrap Admin] Compte Super-Admin déjà opérationnel (${email}).`);
+      }
       return;
     }
     await prisma.user.update({
       where: { id: existing.id },
       data: {
         role: 'SUPER_ADMIN' as PrismaUser['role'],
-        // Un compte sans mot de passe (créé par OTP) reçoit celui du bootstrap.
+        // Un compte sans mot de passe (ex. invitation admin) reçoit celui du bootstrap.
         ...(existing.passwordHash ? {} : { passwordHash: hashPassword(password) }),
       },
     });
@@ -391,7 +412,7 @@ export async function issueOtp(
 export async function consumeOtp(
   phoneNumber: string,
   code: string,
-  /** Restreint la vérification à un type de challenge (« LOGIN », « PAYMENT »…). */
+  /** Restreint la vérification à un type de challenge (« LOGIN », « REGISTER »…). */
   purpose?: string
 ): Promise<boolean> {
   const phone = sanitizeIvorianPhone(phoneNumber);
@@ -452,7 +473,7 @@ export async function writeAuditLog(entry: AuditEntry): Promise<void> {
 
 /**
  * Un unique serveur SMTP suffit pour toutes les notifications transactionnelles
- * (invitations administrateur, reçus, alertes). Tant que `SMTP_HOST`, `SMTP_USER`
+ * (invitations administrateur, alertes). Tant que `SMTP_HOST`, `SMTP_USER`
  * et `SMTP_PASSWORD` ne sont pas renseignés, aucun e-mail n'est émis : le code
  * d'invitation est alors renvoyé à l'administrateur qui le transmet lui-même.
  */
@@ -564,6 +585,14 @@ export async function revokeAdminInvitation(id: string) {
   const invitation = await prisma.adminInvitation.findUnique({ where: { id } });
   if (!invitation) return null;
   return prisma.adminInvitation.update({ where: { id }, data: { status: 'REVOKED' } });
+}
+
+/** Suppression définitive d'une invitation : la ligne disparaît de l'historique. */
+export async function deleteAdminInvitation(id: string) {
+  const invitation = await prisma.adminInvitation.findUnique({ where: { id } });
+  if (!invitation) return null;
+  await prisma.adminInvitation.delete({ where: { id } });
+  return invitation;
 }
 
 export async function markInvitationAccepted(id: string) {

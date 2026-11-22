@@ -1,22 +1,19 @@
 import React from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { useAuth } from '../auth/AuthProvider.tsx';
+import { useAuth } from '../auth/useAuth.ts';
 import {
-  Building2,
   ArrowLeft,
   LayoutDashboard,
   PlusCircle,
   Settings2,
-  CalendarDays,
-  Receipt
+  CalendarDays
 } from 'lucide-react';
 
 const LANDLORD_NAV = [
   { to: '/dashboard', label: 'Tableau de bord', icon: LayoutDashboard, end: true },
   { to: '/dashboard/properties/new', label: 'Publier un bien', icon: PlusCircle, end: false },
   { to: '/dashboard/properties/manage', label: 'Mes biens', icon: Settings2, end: false },
-  { to: '/dashboard/calendar', label: 'Disponibilités', icon: CalendarDays, end: false },
-  { to: '/dashboard/receipts', label: 'Quittances', icon: Receipt, end: false }
+  { to: '/dashboard/calendar', label: 'Disponibilités', icon: CalendarDays, end: false }
 ];
 
 /**
@@ -33,8 +30,12 @@ export const UserDashboardLayout: React.FC = () => {
       <div className="bg-gradient-to-r from-emerald-950 via-emerald-900 to-emerald-900 text-white px-6 py-4 border-b border-emerald-800">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-amber-400 text-emerald-950 flex items-center justify-center font-bold shadow-md shrink-0">
-              <Building2 className="w-5 h-5 stroke-[2.2]" />
+            <div className="inline-flex items-center justify-center rounded-xl bg-white p-1 shadow-md shrink-0">
+              <img
+                src="/atar.jpg"
+                alt="Vallées Fleuries Corporate"
+                className="h-8 w-auto object-contain"
+              />
             </div>
             <div className="min-w-0">
               <h1 className="text-base sm:text-lg font-bold font-serif leading-tight truncate">

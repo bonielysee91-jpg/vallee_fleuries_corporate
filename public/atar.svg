@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100" role="img" aria-label="Logo Vallées Fleuries Corporate">
+  <!-- Carré vert émeraude arrondi -->
+  <rect width="100" height="100" rx="22" fill="#2e8b47"/>
+
+  <!-- Feuille blanche stylisée, entièrement contenue dans le cadre -->
+  <path d="M 50 20
+           C 76 32, 82 58, 50 80
+           C 18 58, 24 32, 50 20 Z"
+        fill="#ffffff"/>
+
+  <!-- Nervure centrale -->
+  <path d="M 50 26 L 50 76"
+        stroke="#2e8b47" stroke-width="3" stroke-linecap="round" fill="none"/>
+
+  <!-- Nervures latérales -->
+  <path d="M 50 42 C 58 42, 65 45, 69 51" stroke="#2e8b47" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+  <path d="M 50 42 C 42 42, 35 45, 31 51" stroke="#2e8b47" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+  <path d="M 50 58 C 56 58, 62 61, 65 65" stroke="#2e8b47" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+  <path d="M 50 58 C 44 58, 38 61, 35 65" stroke="#2e8b47" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+
+  <!-- Graine ambre -->
+  <circle cx="50" cy="86" r="4.5" fill="#d97706"/>
+</svg>

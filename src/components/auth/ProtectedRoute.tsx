@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import { useAuth } from './AuthProvider.tsx';
+import { useAuth } from './useAuth.ts';
 import { useAppStore } from '../../store/useAppStore.ts';
 import { UserRole } from '../../types/index.ts';
 import { landingPathForRole, navigateTo } from '../../router/navigation.ts';

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../../store/useAppStore.ts';
+import { useShallow } from 'zustand/react/shallow';
 import { api } from '../../services/api.ts';
 import { X, Calendar, Clock, Video, UserCheck, MessageSquare, CheckCircle, ExternalLink, AlertCircle } from 'lucide-react';
 
@@ -25,7 +26,15 @@ export const VisitModal: React.FC<VisitModalProps> = ({
   propertyName,
   agentName,
 }) => {
-  const { isVisitModalOpen, closeVisitModal, requestVisitsRefresh, selectedPropertyId, addNotification, currentUser } = useAppStore();
+  const { isVisitModalOpen, closeVisitModal, requestVisitsRefresh, selectedPropertyId, addNotification, currentUser } =
+    useAppStore(useShallow((s) => ({
+      isVisitModalOpen: s.isVisitModalOpen,
+      closeVisitModal: s.closeVisitModal,
+      requestVisitsRefresh: s.requestVisitsRefresh,
+      selectedPropertyId: s.selectedPropertyId,
+      addNotification: s.addNotification,
+      currentUser: s.currentUser,
+    })));
   // Ouverture : la prop « contrôlée » est prioritaire, sinon on lit l'état global du store.
   const isOpen = isOpenProp ?? isVisitModalOpen;
   const closeModal = onClose ?? closeVisitModal;
@@ -71,7 +80,7 @@ export const VisitModal: React.FC<VisitModalProps> = ({
   }, [resolvedPropertyId, isOpen]);
 
   // 🛡️ Sécurité : à chaque ouverture OU changement de bien, on repart d'un modal vierge
-  // (aucun écran « Visite Confirmée », aucune erreur de session ni champ résiduel).
+  // (aucun écran « Demande de Visite Enregistrée », aucune erreur de session ni champ résiduel).
   React.useEffect(() => {
     resetForm();
   }, [isOpen, resolvedPropertyId]);
@@ -94,7 +103,7 @@ export const VisitModal: React.FC<VisitModalProps> = ({
         notes
       });
       setConfirmedVisit(created);
-      addNotification('Visite confirmée avec succès dans l\'agenda VFC !', 'success');
+      addNotification('Demande de visite transmise — en attente de validation.', 'success');
     } catch (err: any) {
       // 401 : session expirée (le rafraîchissement automatique du jeton a déjà échoué).
       if (err?.status === 401) {
@@ -119,11 +128,6 @@ export const VisitModal: React.FC<VisitModalProps> = ({
     }
     resetForm();
     closeModal();
-    // Actualisation automatique : après un rendez-vous enregistré, on recharge la page pour
-    // repartir d'un état et de données 100 % frais (la session est ré-hydratée via le cookie).
-    if (created) {
-      window.location.reload();
-    }
   };
 
   return (
@@ -134,7 +138,7 @@ export const VisitModal: React.FC<VisitModalProps> = ({
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50/70">
           <div>
             <h3 className="text-lg font-bold text-emerald-950 font-serif">
-              {confirmedVisit ? 'Visite Confirmée' : 'Programmer une Visite Exclusive'}
+              {confirmedVisit ? 'Demande de Visite Enregistrée' : 'Programmer une Visite Exclusive'}
             </h3>
             <p className="text-xs text-slate-500">
               {propertyName ?? (property ? property.title : 'Propriété sélectionnée')}
@@ -156,9 +160,9 @@ export const VisitModal: React.FC<VisitModalProps> = ({
                 <CheckCircle className="w-8 h-8" />
               </div>
               <div>
-                <h4 className="text-base font-bold text-slate-900">Rendez-vous Enregistré</h4>
+                <h4 className="text-base font-bold text-slate-900">Demande Transmise au Propriétaire</h4>
                 <p className="text-xs text-slate-600 mt-1 max-w-sm mx-auto">
-                  Votre demande pour le {new Date(confirmedVisit.scheduledDate).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} à {confirmedVisit.scheduledTime} est assignée à {agentName ?? property?.agent?.fullName ?? property?.landlord?.fullName ?? 'la Conciergerie Vallées Fleuries'}.
+                  Votre demande pour le {new Date(confirmedVisit.scheduledDate).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} à {confirmedVisit.scheduledTime} a été transmise à {agentName ?? property?.agent?.fullName ?? property?.landlord?.fullName ?? 'la Conciergerie Vallées Fleuries'}. Vous serez informé dès sa validation.
                 </p>
               </div>
 

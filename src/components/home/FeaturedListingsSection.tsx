@@ -1,11 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { useAppStore } from '../../store/useAppStore.ts';
+import { useShallow } from 'zustand/react/shallow';
 import { api, formatFcfa } from '../../services/api.ts';
 import { Property } from '../../types/index.ts';
+import { optimizedImageUrl } from '../../constants/media.ts';
 import { Heart, Zap, Droplets, Shield, Bed, Bath, Maximize, ArrowRight, Eye } from 'lucide-react';
 
 export const FeaturedListingsSection: React.FC = () => {
-  const { setView, setSelectedPropertyId, favorites, toggleFavorite, openVisitModal } = useAppStore();
+  const { setView, setSelectedPropertyId, favorites, toggleFavorite, openVisitModal } =
+    useAppStore(useShallow((s) => ({
+      setView: s.setView,
+      setSelectedPropertyId: s.setSelectedPropertyId,
+      favorites: s.favorites,
+      toggleFavorite: s.toggleFavorite,
+      openVisitModal: s.openVisitModal,
+    })));
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -32,7 +41,7 @@ export const FeaturedListingsSection: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-12 gap-4">
         <div>
           <span className="text-xs font-bold uppercase tracking-wider text-emerald-800 block mb-2">
-            Collection Exclusive Vallées Fleuries
+            Collection Exclusive Vallées Fleuries Corporate
           </span>
           <h2 className="text-3xl sm:text-4xl font-extrabold text-emerald-950 font-serif">
             Biens d'exception actuellement disponibles.
@@ -67,9 +76,11 @@ export const FeaturedListingsSection: React.FC = () => {
                 {/* Image & Badges */}
                 <div className="relative h-64 overflow-hidden">
                   <img
-                    src={prop.featuredImage}
+                    src={optimizedImageUrl(prop.featuredImage, 800)}
                     alt={prop.title}
                     referrerPolicy="no-referrer"
+                    loading="lazy"
+                    decoding="async"
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/20" />

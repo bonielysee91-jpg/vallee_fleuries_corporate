@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useAppStore } from '../../store/useAppStore.ts';
+import { useShallow } from 'zustand/react/shallow';
 import { api } from '../../services/api.ts';
 import { City } from '../../types/index.ts';
-import { VFC_MEDIA } from '../../constants/media.ts';
+import { VFC_MEDIA, optimizedImageUrl } from '../../constants/media.ts';
 import { MapPin, ArrowUpRight, Loader2 } from 'lucide-react';
 
 /**
@@ -17,8 +18,20 @@ const HUB_IMAGES = [
   VFC_MEDIA.duplexFacade,
 ];
 
+/**
+ * Images spécifiques par ville. Lorsqu'une ville est présente ici, son image
+ * remplace la rotation par défaut. Les fichiers locaux sont servis depuis
+ * /public et ne passent pas par optimizedImageUrl (qui ne traite que Unsplash).
+ */
+const CITY_IMAGE_OVERRIDES: Record<string, string> = {
+  Yamoussoukro: '/images/yamoussoukro.jpg',
+};
+
 export const NeighborhoodsSection: React.FC = () => {
-  const { setFilters, setView } = useAppStore();
+  const { setFilters, setView } = useAppStore(useShallow((s) => ({
+    setFilters: s.setFilters,
+    setView: s.setView,
+  })));
   const [cities, setCities] = useState<City[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -72,7 +85,9 @@ export const NeighborhoodsSection: React.FC = () => {
         </p>
       ) : (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {cities.map((city, idx) => (
+        {cities.map((city, idx) => {
+            const imageUrl = CITY_IMAGE_OVERRIDES[city.name] ?? HUB_IMAGES[idx % HUB_IMAGES.length];
+          return (
           <div
             key={city.id}
             onClick={() => handleSelectCity(city.name)}
@@ -80,9 +95,11 @@ export const NeighborhoodsSection: React.FC = () => {
           >
             {/* Background Image with Scrim */}
             <img
-              src={HUB_IMAGES[idx % HUB_IMAGES.length]}
+              src={optimizedImageUrl(imageUrl, 800)}
               alt={city.name}
               referrerPolicy="no-referrer"
+              loading="lazy"
+              decoding="async"
               className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-[#022C22] via-[#022C22]/50 to-transparent" />
@@ -119,7 +136,8 @@ export const NeighborhoodsSection: React.FC = () => {
               </div>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
       )}
     </section>

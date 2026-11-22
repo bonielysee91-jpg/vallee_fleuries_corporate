@@ -1,9 +1,8 @@
 import React from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { useAuth } from '../auth/AuthProvider.tsx';
+import { useAuth } from '../auth/useAuth.ts';
 import { AdminNotificationBell } from '../dashboard/AdminNotificationBell.tsx';
 import {
-  ShieldCheck,
   Eye,
   ArrowLeft,
   LayoutDashboard,
@@ -11,8 +10,10 @@ import {
   MailPlus,
   FileCheck,
   Building2,
-  Receipt,
-  ScrollText
+  CalendarClock,
+  ScrollText,
+  ShieldCheck,
+  Settings
 } from 'lucide-react';
 
 const ADMIN_NAV = [
@@ -21,8 +22,9 @@ const ADMIN_NAV = [
   { to: '/admin/invitations', label: 'Invitations', icon: MailPlus, end: false },
   { to: '/admin/moderation', label: 'Modération', icon: FileCheck, end: false },
   { to: '/admin/properties', label: 'Biens & Annonces', icon: Building2, end: false },
-  { to: '/admin/transactions', label: 'Transactions', icon: Receipt, end: false },
-  { to: '/admin/audit-logs', label: "Journal d'audit", icon: ScrollText, end: false }
+  { to: '/admin/visits', label: 'Visites', icon: CalendarClock, end: false },
+  { to: '/admin/audit-logs', label: "Journal d'audit", icon: ScrollText, end: false },
+  { to: '/admin/settings', label: 'Sécurité & Accès', icon: ShieldCheck, end: false }
 ];
 
 /**
@@ -37,8 +39,12 @@ export const AdminDashboardLayout: React.FC = () => {
       {/* Top Admin Command Header */}
       <div className="bg-emerald-950 text-white border-b border-emerald-900 px-6 py-3 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold border border-amber-400/40 shrink-0">
-            <ShieldCheck className="w-5 h-5" />
+          <div className="inline-flex items-center justify-center rounded-lg bg-white p-1 shadow shrink-0">
+            <img
+              src="/atar.jpg"
+              alt="Vallées Fleuries Corporate"
+              className="h-7 w-auto object-contain"
+            />
           </div>
           <div className="min-w-0">
             <span className="font-bold text-sm text-white">VFC Command Center — Direction Abidjan</span>
@@ -48,8 +54,17 @@ export const AdminDashboardLayout: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
           <AdminNotificationBell />
+
+          <button
+            onClick={() => navigate('/admin/settings')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-900/80 hover:bg-emerald-800 text-slate-200 hover:text-white text-xs font-semibold transition-all border border-emerald-800 cursor-pointer"
+            title="Paramètres de sécurité & Mot de passe"
+          >
+            <Settings className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden md:inline">Sécurité</span>
+          </button>
 
           <button
             onClick={() => {

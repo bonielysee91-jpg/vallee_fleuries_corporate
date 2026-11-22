@@ -271,7 +271,7 @@ export const CalendarPage: React.FC = () => {
                       <p className="text-[11px] text-slate-500">
                         {new Date(booking.checkInDate).toLocaleDateString('fr-FR')} →{' '}
                         {new Date(booking.checkOutDate).toLocaleDateString('fr-FR')} ·{' '}
-                        {booking.numberOfNights} mois
+                        {booking.numberOfNights} nuit{booking.numberOfNights > 1 ? 's' : ''}
                       </p>
                     </div>
                     <span className="text-xs font-bold text-emerald-950 font-mono tabular-nums">

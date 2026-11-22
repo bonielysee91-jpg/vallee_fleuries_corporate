@@ -6,14 +6,12 @@ import { MobileBottomNav } from './MobileBottomNav.tsx';
 import { TabletDrawer } from './TabletDrawer.tsx';
 import { MobileSearchDrawer } from './MobileSearchDrawer.tsx';
 import { VisitModal } from '../modals/VisitModal.tsx';
-import { PaymentModal } from '../modals/PaymentModal.tsx';
 import { VirtualTourModal } from '../modals/VirtualTourModal.tsx';
-import { QuittanceModal } from '../modals/QuittanceModal.tsx';
 import { useAppStore } from '../../store/useAppStore.ts';
 
 /**
  * Chrome shared by every public / client route: adaptive header, footer,
- * mobile bottom bar, tablet drawer and the transactional modals.
+ * mobile bottom bar, tablet drawer and the visit / virtual-tour modals.
  */
 export const PublicLayout: React.FC = () => {
   const isVisitModalOpen = useAppStore((state) => state.isVisitModalOpen);
@@ -35,9 +33,7 @@ export const PublicLayout: React.FC = () => {
       {/* Montage conditionnel : le modal est démonté puis remonté à chaque ouverture,
           ce qui force un état vierge (formulaire à blanc, aucun écran de succès résiduel). */}
       {isVisitModalOpen && <VisitModal />}
-      <PaymentModal />
       <VirtualTourModal />
-      <QuittanceModal />
     </div>
   );
 };

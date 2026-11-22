@@ -1,5 +1,6 @@
 import React from 'react';
 import { useAppStore } from '../../store/useAppStore.ts';
+import { useShallow } from 'zustand/react/shallow';
 import { VFC_WHATSAPP_URL } from '../../constants/contact.ts';
 import { 
   X, 
@@ -13,7 +14,8 @@ import {
   User, 
   LogOut,
   PhoneCall,
-  Sparkles
+  Sparkles,
+  Wrench
 } from 'lucide-react';
 
 export const TabletDrawer: React.FC = () => {
@@ -27,7 +29,17 @@ export const TabletDrawer: React.FC = () => {
     logoutUser, 
     openAuthModal,
     setFilters 
-  } = useAppStore();
+  } = useAppStore(useShallow((s) => ({
+    isTabletDrawerOpen: s.isTabletDrawerOpen,
+    closeTabletDrawer: s.closeTabletDrawer,
+    currentView: s.currentView,
+    setView: s.setView,
+    favorites: s.favorites,
+    currentUser: s.currentUser,
+    logoutUser: s.logoutUser,
+    openAuthModal: s.openAuthModal,
+    setFilters: s.setFilters,
+  })));
 
   if (!isTabletDrawerOpen) return null;
 
@@ -50,14 +62,12 @@ export const TabletDrawer: React.FC = () => {
         
         {/* Header */}
         <div className="flex items-center justify-between pb-6 border-b border-white/10">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-800 flex items-center justify-center text-amber-400 border border-amber-400/30">
-              <Building2 className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="font-serif text-lg font-bold text-white leading-none">Vallées Fleuries</div>
-              <div className="text-[10px] text-amber-400 uppercase tracking-widest font-semibold mt-1">Corporate CI</div>
-            </div>
+          <div className="inline-flex items-center rounded-xl bg-white p-1 shadow-lg">
+            <img
+              src="/atar.jpg"
+              alt="Vallées Fleuries Corporate"
+              className="h-9 w-auto object-contain"
+            />
           </div>
 
           <button
@@ -83,15 +93,26 @@ export const TabletDrawer: React.FC = () => {
           ) : (
             <div className="flex items-center justify-between w-full">
               <span className="text-xs text-slate-300">Non connecté</span>
-              <button
-                onClick={() => {
-                  closeTabletDrawer();
-                  openAuthModal('LOGIN');
-                }}
-                className="text-xs font-bold text-amber-400 hover:underline"
-              >
-                Se connecter
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => {
+                    closeTabletDrawer();
+                    openAuthModal('REGISTER');
+                  }}
+                  className="text-xs font-bold text-emerald-300 hover:underline"
+                >
+                  S'inscrire
+                </button>
+                <button
+                  onClick={() => {
+                    closeTabletDrawer();
+                    openAuthModal('LOGIN');
+                  }}
+                  className="text-xs font-bold text-amber-400 hover:underline"
+                >
+                  Se connecter
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -123,7 +144,7 @@ export const TabletDrawer: React.FC = () => {
             className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-slate-200 hover:bg-white/10 transition-colors"
           >
             <Sparkles className="w-5 h-5 text-amber-400" />
-            <span>Maisons à Vendre</span>
+            <span>Maisons en Vente</span>
           </button>
 
           <button
@@ -131,7 +152,7 @@ export const TabletDrawer: React.FC = () => {
             className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-slate-200 hover:bg-white/10 transition-colors"
           >
             <Building2 className="w-5 h-5 text-emerald-400" />
-            <span>Maisons à Louer (Location Longue Durée)</span>
+            <span>Maisons en Location</span>
           </button>
 
           <button
@@ -144,13 +165,35 @@ export const TabletDrawer: React.FC = () => {
             <span>Simulateur Frais d'Entrée</span>
           </button>
 
+          <button
+            onClick={() => navigateTo('services')}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${
+              currentView === 'services' ? 'bg-white/15 text-amber-300 font-bold' : 'text-slate-200 hover:bg-white/10'
+            }`}
+          >
+            <Wrench className="w-5 h-5 text-emerald-400" />
+            <span>Nos Services</span>
+          </button>
+
+          <button
+            onClick={() => navigateTo('avant-propos')}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${
+              currentView === 'avant-propos' ? 'bg-white/15 text-amber-300 font-bold' : 'text-slate-200 hover:bg-white/10'
+            }`}
+          >
+            <Building2 className="w-5 h-5 text-emerald-400" />
+            <span>À propos du Groupe VFC</span>
+          </button>
+
           {/* Favorites Link */}
           <button
-            onClick={() => navigateTo('properties')}
-            className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium text-slate-200 hover:bg-white/10 transition-colors"
+            onClick={() => navigateTo('favorites')}
+            className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-colors ${
+              currentView === 'favorites' ? 'bg-white/15 text-amber-300 font-bold' : 'text-slate-200 hover:bg-white/10'
+            }`}
           >
             <div className="flex items-center gap-3">
-              <Heart className="w-5 h-5 text-rose-400" />
+              <Heart className={`w-5 h-5 ${favorites.length > 0 ? 'fill-rose-400 text-rose-400' : 'text-rose-400'}`} />
               <span>Ma Sélection Privée</span>
             </div>
             {favorites.length > 0 && (

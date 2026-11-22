@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useAppStore } from '../store/useAppStore.ts';
 import { api, formatFcfa } from '../services/api.ts';
 import { Property } from '../types/index.ts';
-import { FALLBACK_PROPERTY_IMAGE } from '../constants/media.ts';
+import { FALLBACK_PROPERTY_IMAGE, optimizedImageUrl } from '../constants/media.ts';
 import { Heart, MapPin, Bed, Bath, Maximize, ArrowRight, Loader2, Compass } from 'lucide-react';
 
 /** Saved properties list — `/favorites` (clients, owners, admins). */
@@ -85,14 +85,15 @@ export const FavoritesPage: React.FC = () => {
               <div className="relative h-44 bg-slate-100">
                 <img
                   src={
-                    property.coverImage ||
-                    property.featuredImage ||
-                    property.images?.[0]?.url ||
-                    FALLBACK_PROPERTY_IMAGE
+                    optimizedImageUrl(
+                      property.coverImage || property.featuredImage || property.images?.[0]?.url,
+                      600
+                    ) || FALLBACK_PROPERTY_IMAGE
                   }
                   alt={property.title}
                   className="w-full h-full object-cover"
                   loading="lazy"
+                  decoding="async"
                 />
                 <button
                   onClick={() => toggleFavorite(property.id)}

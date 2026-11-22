@@ -1,28 +1,18 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAppStore } from '../../store/useAppStore.ts';
-import { User, UserRole } from '../../types/index.ts';
+import { useShallow } from 'zustand/react/shallow';
+import { AuthContext } from './AuthContext.ts';
 import { api } from '../../services/api.ts';
 
-interface AuthContextType {
-  currentUser: User | null;
-  isAuthenticated: boolean;
-  /** True until the Neon-backed session check has resolved (prevents auth flicker). */
-  isInitializing: boolean;
-  isAdmin: boolean;
-  isOwner: boolean;
-  isTenant: boolean;
-  role: UserRole | null;
-  adminPreviewMode: boolean; // Allows admin to view the site as a normal client without logging out
-  toggleAdminPreview: () => void;
-  login: (user: User, token?: string) => void;
-  logout: () => Promise<void>;
-  refreshSession: () => Promise<void>;
-}
-
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { currentUser, isAuthenticated, loginUser, logoutUser, setFavorites } = useAppStore();
+  const { currentUser, isAuthenticated, loginUser, logoutUser, setFavorites } =
+    useAppStore(useShallow((s) => ({
+      currentUser: s.currentUser,
+      isAuthenticated: s.isAuthenticated,
+      loginUser: s.loginUser,
+      logoutUser: s.logoutUser,
+      setFavorites: s.setFavorites,
+    })));
   const [adminPreviewMode, setAdminPreviewMode] = useState<boolean>(false);
   const [isInitializing, setIsInitializing] = useState<boolean>(true);
 
@@ -99,12 +89,4 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       {children}
     </AuthContext.Provider>
   );
-};
-
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
 };

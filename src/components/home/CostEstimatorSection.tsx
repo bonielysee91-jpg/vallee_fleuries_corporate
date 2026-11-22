@@ -1,21 +1,53 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useAppStore } from '../../store/useAppStore.ts';
-import { api, formatFcfa } from '../../services/api.ts';
+import { useShallow } from 'zustand/react/shallow';
+import { formatFcfa } from '../../services/api.ts';
 import { MoveInCostBreakdown } from '../../types/index.ts';
 import { Calculator, ShieldCheck, Info, ArrowRight, Check } from 'lucide-react';
 
 export const CostEstimatorSection: React.FC = () => {
-  const { setFilters, setView } = useAppStore();
+  const { setFilters, setView } = useAppStore(useShallow((s) => ({
+    setFilters: s.setFilters,
+    setView: s.setView,
+  })));
   const [monthlyRent, setMonthlyRent] = useState(1500000);
-  const [advanceMonths, setAdvanceMonths] = useState(2);
-  const [depositMonths, setDepositMonths] = useState(2);
-  const [agencyFeeMonths, setAgencyFeeMonths] = useState(1);
-  const [keyMoney, setKeyMoney] = useState(0);
-  const [breakdown, setBreakdown] = useState<MoveInCostBreakdown | null>(null);
+  const [advanceMonths] = useState(2);
+  const [depositMonths] = useState(2);
+  const [agencyFeeMonths] = useState(1);
+  const [keyMoney] = useState(0);
 
-  useEffect(() => {
-    api.calculateMoveInCost(monthlyRent, advanceMonths, depositMonths, agencyFeeMonths, keyMoney)
-      .then(setBreakdown);
+  // Calcul purement local (aucun appel réseau) : le budget se recalcule instantanément
+  // pendant que l'utilisateur déplace le curseur du loyer, sans latence ni requête HTTP.
+  const breakdown = useMemo<MoveInCostBreakdown>(() => {
+    const advanceAmount = monthlyRent * advanceMonths;
+    const depositAmount = monthlyRent * depositMonths;
+    const agencyFeeAmount = monthlyRent * agencyFeeMonths;
+    const stampDuty = Math.round(monthlyRent * 12 * 0.025); // 2,5 % droit de bail DGI
+    const totalUpfrontCost = advanceAmount + depositAmount + agencyFeeAmount + keyMoney + stampDuty;
+
+    return {
+      monthlyRent,
+      monthlyRentFcfa: monthlyRent,
+      advanceMonths,
+      advanceAmount,
+      advanceAmountFcfa: advanceAmount,
+      depositMonths,
+      depositAmount,
+      depositAmountFcfa: depositAmount,
+      agencyFeeMonths,
+      agencyFeeAmount,
+      agencyFeeAmountFcfa: agencyFeeAmount,
+      keyMoney,
+      keyMoneyFcfa: keyMoney,
+      serviceCharges: 0,
+      stampDutyAndRegistration: stampDuty,
+      leaseDraftingFeeFcfa: stampDuty,
+      totalUpfrontCost,
+      totalInitialPayoutFcfa: totalUpfrontCost,
+      legalNotice:
+        "Conforme à la Loi N° 2019-576 du 26 juin 2019 relative au bail à usage d'habitation en Côte d'Ivoire.",
+      currency: 'FCFA',
+    };
   }, [monthlyRent, advanceMonths, depositMonths, agencyFeeMonths, keyMoney]);
 
   return (

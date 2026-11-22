@@ -3,13 +3,26 @@ import { FilterState, User } from '../types/index.ts';
 import { navigateTo, pathForView } from '../router/navigation.ts';
 import { api, setAccessToken } from '../services/api.ts';
 
-interface Notification {
+export interface Notification {
   id: string;
   type: 'success' | 'info' | 'warning' | 'error';
   message: string;
+  persistent?: boolean;
 }
 
-export type AppView = 'home' | 'properties' | 'property-detail' | 'estimator' | 'dashboard' | 'admin' | 'favorites' | 'messages' | 'profile' | 'architecture';
+export interface ConfirmationOptions {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  variant?: 'danger' | 'warning' | 'info';
+  inputPlaceholder?: string;
+  defaultValue?: string;
+  onConfirm: (inputValue?: string) => void | Promise<void>;
+  onCancel?: () => void;
+}
+
+export type AppView = 'home' | 'properties' | 'property-detail' | 'estimator' | 'dashboard' | 'admin' | 'favorites' | 'messages' | 'profile' | 'architecture' | 'avant-propos' | 'services';
 
 interface AppState {
   currentView: AppView;
@@ -29,27 +42,13 @@ interface AppState {
 
   // Domain Modals state
   isVisitModalOpen: boolean;
-  isPaymentModalOpen: boolean;
   isVirtualTourOpen: boolean;
-  isQuittanceModalOpen: boolean;
+  confirmationDialog: ConfirmationOptions | null;
   /**
    * Jeton incrémenté après chaque création de visite : les écrans qui listent les
    * rendez-vous s'y abonnent pour recharger leur liste depuis Neon.
    */
   visitsRefreshToken: number;
-  activePaymentDetails: {
-    amountFcfa: number;
-    purpose: string;
-    propertyTitle?: string;
-    /**
-     * Rattachement contractuel transmis à la transaction : c'est lui qui, à l'encaissement
-     * confirmé par l'opérateur, active le bail / la réservation et sort le bien du marché.
-     */
-    propertyId?: string;
-    bookingId?: string;
-    leaseId?: string;
-    onSuccessCallback?: () => void;
-  } | null;
 
   // Actions
   setView: (view: AppView, propertyId?: string) => void;
@@ -59,13 +58,15 @@ interface AppState {
   resetFilters: () => void;
   toggleFavorite: (propertyId: string) => void;
   setFavorites: (propertyIds: string[]) => void;
-  addNotification: (message: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
+  addNotification: (message: string, type?: 'success' | 'info' | 'warning' | 'error', persistent?: boolean) => void;
   removeNotification: (id: string) => void;
+  openConfirmation: (options: ConfirmationOptions) => void;
+  closeConfirmation: () => void;
 
   // Auth actions
   loginUser: (user: User, token?: string) => void;
   logoutUser: () => void;
-  openAuthModal: (mode?: 'LOGIN' | 'REGISTER' | 'OTP') => void;
+  openAuthModal: (mode?: 'LOGIN' | 'REGISTER') => void;
 
   // Adaptive Navigation actions
   openMobileSearch: () => void;
@@ -77,20 +78,8 @@ interface AppState {
   openVisitModal: () => void;
   closeVisitModal: () => void;
   requestVisitsRefresh: () => void;
-  openPaymentModal: (details: {
-    amountFcfa: number;
-    purpose: string;
-    propertyTitle?: string;
-    propertyId?: string;
-    bookingId?: string;
-    leaseId?: string;
-    onSuccessCallback?: () => void;
-  }) => void;
-  closePaymentModal: () => void;
   openVirtualTour: () => void;
   closeVirtualTour: () => void;
-  openQuittanceModal: () => void;
-  closeQuittanceModal: () => void;
 }
 
 const DEFAULT_FILTERS: FilterState = {
@@ -99,7 +88,6 @@ const DEFAULT_FILTERS: FilterState = {
   propertyType: 'ALL',
   commune: 'ALL',
   minPrice: 0,
-  maxPrice: 15000000,
   bedrooms: 'ALL',
   furnishing: 'ALL',
   amenities: [],
@@ -122,11 +110,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   isTabletDrawerOpen: false,
 
   isVisitModalOpen: false,
-  isPaymentModalOpen: false,
   isVirtualTourOpen: false,
-  isQuittanceModalOpen: false,
+  confirmationDialog: null,
   visitsRefreshToken: 0,
-  activePaymentDetails: null,
 
   setView: (view, propertyId) => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -148,6 +134,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     const derived =
       pathname === '/' || pathname.startsWith('/accueil') ? 'home'
         : pathname.startsWith('/properties') || pathname.startsWith('/nos-biens') ? 'properties'
+        : pathname.startsWith('/avant-propos') || pathname.startsWith('/a-propos') ? 'avant-propos'
+        : pathname.startsWith('/services') ? 'services'
         : pathname.startsWith('/estimator') ? 'estimator'
         : pathname.startsWith('/dashboard') ? 'dashboard'
         : pathname.startsWith('/admin') ? 'admin'
@@ -187,20 +175,34 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setFavorites: (propertyIds) => set({ favorites: propertyIds }),
 
-  addNotification: (message, type = 'success') => {
+  addNotification: (message, type = 'success', persistent = false) => {
     const id = Date.now().toString() + Math.random().toString(36).slice(2, 6);
     set((state) => ({
-      notifications: [...state.notifications, { id, message, type }]
+      notifications: [...state.notifications, { id, message, type, persistent }]
     }));
-    setTimeout(() => {
-      get().removeNotification(id);
-    }, 4500);
+    // Persistent errors remain until manually dismissed; other notifications auto-dismiss
+    if (!persistent && type !== 'error') {
+      setTimeout(() => {
+        get().removeNotification(id);
+      }, 5000);
+    } else if (type === 'error' && !persistent) {
+      setTimeout(() => {
+        get().removeNotification(id);
+      }, 8000);
+    }
   },
 
   removeNotification: (id) => {
     set((state) => ({
       notifications: state.notifications.filter(n => n.id !== id)
     }));
+  },
+
+  openConfirmation: (options) => set({ confirmationDialog: options }),
+  closeConfirmation: () => {
+    const dialog = get().confirmationDialog;
+    if (dialog?.onCancel) dialog.onCancel();
+    set({ confirmationDialog: null });
   },
 
   loginUser: (user, token) => {
@@ -237,15 +239,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   closeVisitModal: () => set({ isVisitModalOpen: false }),
   requestVisitsRefresh: () => set((state) => ({ visitsRefreshToken: state.visitsRefreshToken + 1 })),
 
-  openPaymentModal: (details) => set({
-    isPaymentModalOpen: true,
-    activePaymentDetails: details
-  }),
-  closePaymentModal: () => set({ isPaymentModalOpen: false, activePaymentDetails: null }),
-
   openVirtualTour: () => set({ isVirtualTourOpen: true }),
   closeVirtualTour: () => set({ isVirtualTourOpen: false }),
-
-  openQuittanceModal: () => set({ isQuittanceModalOpen: true }),
-  closeQuittanceModal: () => set({ isQuittanceModalOpen: false }),
 }));

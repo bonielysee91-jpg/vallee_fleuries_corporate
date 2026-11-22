@@ -55,6 +55,7 @@ const statusPillClass = (status: Property['status']): string => {
  */
 export const AdminPropertiesPage: React.FC = () => {
   const addNotification = useAppStore((state) => state.addNotification);
+  const openConfirmation = useAppStore((state) => state.openConfirmation);
 
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,44 +92,46 @@ export const AdminPropertiesPage: React.FC = () => {
     };
   }, [load]);
 
-  const handleReset = async (prop: Property) => {
-    const confirmed = window.confirm(
-      `Réinitialiser « ${prop.title} » ?\n\n` +
-        'Le bien repassera en « En attente de validation » et quittera le catalogue public ' +
-        "jusqu'à revalidation. Aucune donnée n'est supprimée."
-    );
-    if (!confirmed) return;
-
-    setBusyId(prop.id);
-    try {
-      const updated = await api.adminResetProperty(prop.id);
-      setProperties((prev) => prev.map((item) => (item.id === prop.id ? updated : item)));
-      addNotification(`Bien réinitialisé : ${updated.title}`, 'success');
-    } catch (err: any) {
-      addNotification(err?.message || 'Réinitialisation impossible', 'error');
-    } finally {
-      setBusyId(null);
-    }
+  const handleReset = (prop: Property) => {
+    openConfirmation({
+      title: 'Réinitialiser le bien immobilier',
+      message: `Êtes-vous sûr de vouloir réinitialiser « ${prop.title} » ?\n\nLe bien repassera en « En attente de validation » et quittera le catalogue public jusqu'à homologation. Aucune donnée n'est supprimée.`,
+      confirmLabel: 'Réinitialiser',
+      variant: 'warning',
+      onConfirm: async () => {
+        setBusyId(prop.id);
+        try {
+          const updated = await api.adminResetProperty(prop.id);
+          setProperties((prev) => prev.map((item) => (item.id === prop.id ? updated : item)));
+          addNotification(`Bien réinitialisé : ${updated.title}`, 'success');
+        } catch (err: any) {
+          addNotification(err?.message || 'Réinitialisation impossible', 'error');
+        } finally {
+          setBusyId(null);
+        }
+      }
+    });
   };
 
-  const handleDelete = async (prop: Property) => {
-    const confirmed = window.confirm(
-      `Supprimer définitivement « ${prop.title} » ?\n\n` +
-        'Cette action est irréversible. Elle est refusée si le bien possède des réservations, ' +
-        'des baux ou des demandes de visite (préservation de l’historique juridique).'
-    );
-    if (!confirmed) return;
-
-    setBusyId(prop.id);
-    try {
-      await api.deleteProperty(prop.id);
-      setProperties((prev) => prev.filter((item) => item.id !== prop.id));
-      addNotification(`Bien supprimé : ${prop.title}`, 'success');
-    } catch (err: any) {
-      addNotification(err?.message || 'Suppression impossible', 'error');
-    } finally {
-      setBusyId(null);
-    }
+  const handleDelete = (prop: Property) => {
+    openConfirmation({
+      title: 'Supprimer définitivement le bien',
+      message: `Supprimer définitivement « ${prop.title} » ?\n\nCette action est irréversible. Elle sera refusée si le bien possède des réservations, baux ou demandes de visite associées afin de préserver l'historique légal.`,
+      confirmLabel: 'Supprimer définitivement',
+      variant: 'danger',
+      onConfirm: async () => {
+        setBusyId(prop.id);
+        try {
+          await api.deleteProperty(prop.id);
+          setProperties((prev) => prev.filter((item) => item.id !== prop.id));
+          addNotification(`Bien supprimé : ${prop.title}`, 'success');
+        } catch (err: any) {
+          addNotification(err?.message || 'Suppression impossible', 'error');
+        } finally {
+          setBusyId(null);
+        }
+      }
+    });
   };
 
   const counts = useMemo(() => {

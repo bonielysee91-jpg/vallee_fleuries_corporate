@@ -60,8 +60,8 @@ export const SystemArchitecturePage: React.FC = () => {
           Architecture &amp; Schéma de la base Neon
         </h1>
         <p className="text-xs text-slate-600 mt-1 max-w-3xl leading-relaxed">
-          Structure de données qui garantit l'intégrité du registre immobilier, la sécurité des
-          transactions Mobile Money et l'authentification stricte des visiteurs et de
+          Structure de données qui garantit l'intégrité du registre immobilier, la traçabilité des
+          parcours locatifs et l'authentification stricte des visiteurs et de
           l'administration.
         </p>
       </header>

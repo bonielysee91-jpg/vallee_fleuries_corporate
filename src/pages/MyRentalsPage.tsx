@@ -1,35 +1,50 @@
 import React, { useEffect, useState } from 'react';
 import { useAppStore } from '../store/useAppStore.ts';
 import { api, formatFcfa } from '../services/api.ts';
-import { Booking, LeaseAgreement } from '../types/index.ts';
+import { Booking, LeaseAgreement, VisitAppointment, VisitStatus } from '../types/index.ts';
 import {
   Building2,
   CalendarCheck,
+  CalendarClock,
+  CheckCircle2,
+  Clock,
   Loader2,
   MapPin,
+  MessageSquare,
   Compass,
   FileText,
   ArrowRight,
-  AlertTriangle
+  AlertTriangle,
+  XCircle,
+  type LucideIcon
 } from 'lucide-react';
+
+/** Présentation des statuts d'une demande de visite côté client. */
+const VISIT_STATUS_META: Record<VisitStatus, { label: string; className: string; Icon: LucideIcon }> = {
+  PENDING: { label: 'En attente', className: 'bg-amber-100 text-amber-800', Icon: Clock },
+  CONFIRMED: { label: 'Acceptée', className: 'bg-emerald-100 text-emerald-800', Icon: CheckCircle2 },
+  COMPLETED: { label: 'Effectuée', className: 'bg-blue-100 text-blue-800', Icon: CalendarCheck },
+  CANCELLED: { label: 'Refusée', className: 'bg-rose-100 text-rose-700', Icon: XCircle }
+};
 
 /** `/my-rentals` — active long-term leases and short-stay bookings of the tenant. */
 export const MyRentalsPage: React.FC = () => {
   const setView = useAppStore((state) => state.setView);
-  const [tab, setTab] = useState<'LEASES' | 'BOOKINGS'>('LEASES');
+  const [tab, setTab] = useState<'LEASES' | 'BOOKINGS' | 'VISITS'>('LEASES');
   const [leases, setLeases] = useState<LeaseAgreement[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [visits, setVisits] = useState<VisitAppointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    api
-      .getMyRentals()
-      .then((data) => {
+    Promise.all([api.getMyRentals(), api.getMyVisits()])
+      .then(([rentals, myVisits]) => {
         if (cancelled) return;
-        setLeases(data.leases ?? []);
-        setBookings(data.bookings ?? []);
+        setLeases(rentals.leases ?? []);
+        setBookings(rentals.bookings ?? []);
+        setVisits(myVisits ?? []);
       })
       .catch((err) => {
         if (!cancelled) setError(err?.message || 'Chargement impossible');
@@ -145,7 +160,54 @@ export const MyRentalsPage: React.FC = () => {
     </article>
   );
 
-  const visible = tab === 'LEASES' ? leases : bookings;
+  const renderVisit = (visit: VisitAppointment) => {
+    const meta = VISIT_STATUS_META[visit.status];
+    return (
+      <article key={visit.id} className="liquid-glass-card rounded-3xl p-5 border border-white/60">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-900 text-[10px] font-black uppercase tracking-wide">
+              <CalendarClock className="w-3 h-3" />
+              Demande de visite
+            </span>
+            <h3 className="font-serif text-base font-bold text-slate-900 mt-2">
+              {visit.propertyTitle || 'Bien immobilier'}
+            </h3>
+            <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1.5">
+              <MapPin className="w-3.5 h-3.5 text-emerald-700" />
+              {visit.commune || 'Abidjan'} · {formatDate(visit.scheduledDate)}
+              {visit.scheduledTime ? ` · ${visit.scheduledTime}` : ''}
+            </p>
+          </div>
+          <span
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wide ${meta.className}`}
+          >
+            <meta.Icon className="w-3 h-3" />
+            {meta.label}
+          </span>
+        </div>
+
+        {visit.adminMessage ? (
+          <div className="mt-4 rounded-2xl bg-emerald-950 text-white p-4 border border-emerald-900">
+            <p className="text-[10px] font-black uppercase tracking-wide text-amber-400 flex items-center gap-1.5">
+              <MessageSquare className="w-3.5 h-3.5" />
+              Message de l'administrateur
+            </p>
+            <p className="text-xs text-emerald-50/90 mt-1.5 leading-relaxed">{visit.adminMessage}</p>
+          </div>
+        ) : (
+          <p className="mt-4 text-[11px] text-slate-500">
+            {visit.status === 'PENDING'
+              ? "Votre demande est en cours d'examen par la Direction. La réponse s'affichera ici."
+              : 'Aucun message complémentaire.'}
+          </p>
+        )}
+      </article>
+    );
+  };
+
+  const visible: Array<LeaseAgreement | Booking | VisitAppointment> =
+    tab === 'LEASES' ? leases : tab === 'BOOKINGS' ? bookings : visits;
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
@@ -161,7 +223,8 @@ export const MyRentalsPage: React.FC = () => {
       <div className="flex items-center gap-2 p-1 rounded-2xl bg-slate-100 w-fit">
         {([
           { id: 'LEASES' as const, label: `Baux (${leases.length})`, icon: FileText },
-          { id: 'BOOKINGS' as const, label: `Séjours (${bookings.length})`, icon: CalendarCheck }
+          { id: 'BOOKINGS' as const, label: `Séjours (${bookings.length})`, icon: CalendarCheck },
+          { id: 'VISITS' as const, label: `Visites (${visits.length})`, icon: CalendarClock }
         ]).map((item) => (
           <button
             key={item.id}
@@ -192,10 +255,16 @@ export const MyRentalsPage: React.FC = () => {
             <Building2 className="w-7 h-7" />
           </div>
           <h2 className="font-serif text-lg font-bold text-slate-900">
-            {tab === 'LEASES' ? 'Aucun bail actif' : 'Aucun séjour réservé'}
+            {tab === 'LEASES'
+              ? 'Aucun bail actif'
+              : tab === 'BOOKINGS'
+              ? 'Aucun séjour réservé'
+              : 'Aucune demande de visite'}
           </h2>
           <p className="text-xs text-slate-500 mt-2 mb-6">
-            Explorez le catalogue pour trouver votre prochaine résidence à Abidjan.
+            {tab === 'VISITS'
+              ? "Programmez une visite depuis la fiche d'un bien : vous suivrez ici sa validation par la Direction."
+              : 'Explorez le catalogue pour trouver votre prochaine résidence à Abidjan.'}
           </p>
           <button
             onClick={() => setView('properties')}
@@ -206,7 +275,15 @@ export const MyRentalsPage: React.FC = () => {
           </button>
         </div>
       ) : (
-        <div className="space-y-4">{visible.map((item) => ('leaseNumber' in item ? renderLease(item as LeaseAgreement) : renderBooking(item as Booking)))}</div>
+        <div className="space-y-4">
+          {visible.map((item) =>
+            'leaseNumber' in item
+              ? renderLease(item as LeaseAgreement)
+              : 'bookingNumber' in item
+              ? renderBooking(item as Booking)
+              : renderVisit(item as VisitAppointment)
+          )}
+        </div>
       )}
     </div>
   );

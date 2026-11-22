@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppStore } from '../../store/useAppStore.ts';
-import { AdminStats, api, formatFcfa } from '../../services/api.ts';
+import { AdminStats, api } from '../../services/api.ts';
 import {
   Activity,
   AlertTriangle,
@@ -11,16 +11,18 @@ import {
   Landmark,
   Loader2,
   ListChecks,
-  Percent,
-  Receipt,
   ScrollText,
-  Smartphone,
   UserCog,
-  Users,
-  Wallet
+  Users
 } from 'lucide-react';
 
 const QUICK_LINKS = [
+  {
+    to: '/admin/visits',
+    icon: CalendarCheck,
+    title: 'Confirmation des visites clients',
+    description: 'Valider les demandes de visite, assigner les créneaux et confirmer sur WhatsApp.'
+  },
   {
     to: '/admin/users',
     icon: UserCog,
@@ -34,36 +36,36 @@ const QUICK_LINKS = [
     description: 'Homologuer les mandats propriétaires en attente et publier les annonces locatives.'
   },
   {
-    to: '/admin/transactions',
-    icon: Receipt,
-    title: 'Grand livre Mobile Money',
-    description: 'Auditer les encaissements et la répartition commissions / propriétaires.'
-  },
-  {
     to: '/admin/audit-logs',
     icon: ScrollText,
-    title: 'Journaux d\'audit immuables',
-    description: 'Consulter l\'historique horodaté des actions des administrateurs.'
+    title: 'Journaux d\'audit & purge',
+    description: 'Consulter l\'historique horodaté des actions administrateurs et le purger.'
+  },
+  {
+    to: '/admin/settings',
+    icon: UserCog,
+    title: 'Sécurité & Accès Super-Admin',
+    description: 'Gestion du compte administrateur, mise à jour sécurisée du mot de passe et habilitations.'
   }
 ];
-
-const MOBILE_MONEY_PROVIDERS = ['Wave', 'Orange Money', 'MTN MoMo', 'Moov Money'];
 
 /** `/admin` — Super-Admin command centre with platform-wide KPIs. */
 export const AdminOverviewPage: React.FC = () => {
   const addNotification = useAppStore((state) => state.addNotification);
   const [stats, setStats] = useState<AdminStats | null>(null);
+  const [pendingVisitsCount, setPendingVisitsCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    api
-      .adminGetStats()
-      .then((data) => {
+    Promise.all([api.adminGetStats(), api.getVisits()])
+      .then(([data, visits]) => {
         if (cancelled) return;
         setStats(data);
+        const pending = visits.filter((v) => v.status === 'PENDING').length;
+        setPendingVisitsCount(pending);
         setError(null);
       })
       .catch((err: any) => {
@@ -82,12 +84,10 @@ export const AdminOverviewPage: React.FC = () => {
 
   const kpis = stats
     ? [
-        { label: 'Utilisateurs inscrits', value: stats.users.toLocaleString('fr-FR'), icon: Users, tone: 'emerald' as const },
-        { label: 'Biens publiés', value: stats.properties.toLocaleString('fr-FR'), icon: Building2, tone: 'emerald' as const },
-        { label: 'Réservations', value: stats.bookings.toLocaleString('fr-FR'), icon: CalendarCheck, tone: 'amber' as const },
-        { label: 'Sessions actives', value: stats.activeSessions.toLocaleString('fr-FR'), icon: Activity, tone: 'emerald' as const },
-        { label: 'Volume transactions', value: formatFcfa(stats.transactionVolumeFcfa), icon: Wallet, tone: 'emerald' as const },
-        { label: 'Commissions VFC encaissées', value: formatFcfa(stats.commissionRevenueFcfa), icon: Percent, tone: 'amber' as const }
+        { label: 'Utilisateurs inscrits', value: stats.users.toLocaleString('fr-FR'), icon: Users, tone: 'emerald' as const, to: '/admin/users' },
+        { label: 'Biens publiés', value: stats.properties.toLocaleString('fr-FR'), icon: Building2, tone: 'emerald' as const, to: '/admin/properties' },
+        { label: 'Réservations & Visites', value: stats.bookings.toLocaleString('fr-FR'), icon: CalendarCheck, tone: 'amber' as const, to: '/admin/visits' },
+        { label: 'Sessions actives', value: stats.activeSessions.toLocaleString('fr-FR'), icon: Activity, tone: 'emerald' as const, to: '/admin/audit-logs' }
       ]
     : [];
 
@@ -101,9 +101,35 @@ export const AdminOverviewPage: React.FC = () => {
           Poste de commandement Super-Admin
         </h1>
         <p className="text-xs text-slate-600 mt-1">
-          Vue consolidée du registre locatif, des flux financiers et de la conformité foncière.
+          Vue consolidée du registre locatif, des parcours clients et de la conformité foncière.
         </p>
       </header>
+
+      {/* Alerte Visites en attente de confirmation */}
+      {pendingVisitsCount > 0 && (
+        <div className="rounded-2xl bg-amber-500/10 border border-amber-300/80 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+          <div className="flex items-center gap-3">
+            <span className="w-10 h-10 rounded-xl bg-amber-500 text-emerald-950 flex items-center justify-center shrink-0">
+              <CalendarCheck className="w-5 h-5" />
+            </span>
+            <div>
+              <p className="text-xs font-bold text-amber-950">
+                {pendingVisitsCount} demande{pendingVisitsCount > 1 ? 's' : ''} de visite en attente de confirmation
+              </p>
+              <p className="text-[11px] text-amber-800">
+                Des clients attendent la validation de leur créneau de visite et leur confirmation WhatsApp.
+              </p>
+            </div>
+          </div>
+          <Link
+            to="/admin/visits"
+            className="px-4 py-2 rounded-xl bg-emerald-900 hover:bg-emerald-800 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition-all shrink-0"
+          >
+            <span>Confirmer les visites</span>
+            <ArrowRight className="w-3.5 h-3.5 text-amber-400" />
+          </Link>
+        </div>
+      )}
 
       {loading ? (
         <div className="py-16 flex flex-col items-center text-slate-500">
@@ -118,20 +144,24 @@ export const AdminOverviewPage: React.FC = () => {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {kpis.map((kpi) => (
-            <div
+            <Link
               key={kpi.label}
-              className="rounded-2xl liquid-glass-card border border-white/60 shadow-sm p-5 flex items-start justify-between gap-4"
+              to={kpi.to}
+              className="group rounded-2xl liquid-glass-card border border-white/60 hover:border-emerald-300 shadow-sm hover:shadow-md p-5 flex items-start justify-between gap-4 transition-all duration-200 hover:-translate-y-0.5 cursor-pointer"
             >
               <div className="min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                  {kpi.label}
-                </p>
+                <div className="flex items-center gap-1.5 text-slate-500 group-hover:text-emerald-900 transition-colors">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide">
+                    {kpi.label}
+                  </p>
+                  <ArrowRight className="w-3 h-3 opacity-0 group-hover:opacity-100 -translate-x-1 group-hover:translate-x-0 transition-all text-emerald-700" />
+                </div>
                 <p className="mt-1.5 text-xl font-bold text-emerald-950 font-mono tabular-nums break-words">
                   {kpi.value}
                 </p>
               </div>
               <span
-                className={`shrink-0 w-10 h-10 rounded-xl flex items-center justify-center ${
+                className={`shrink-0 w-10 h-10 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110 ${
                   kpi.tone === 'amber'
                     ? 'bg-amber-100 text-[#D97706]'
                     : 'bg-emerald-100 text-emerald-800'
@@ -139,7 +169,7 @@ export const AdminOverviewPage: React.FC = () => {
               >
                 <kpi.icon className="w-5 h-5" />
               </span>
-            </div>
+            </Link>
           ))}
         </div>
       )}
@@ -189,24 +219,17 @@ export const AdminOverviewPage: React.FC = () => {
 
         <section className="rounded-2xl bg-white border border-slate-200 shadow-sm p-6 space-y-4">
           <div className="flex items-center gap-2 text-emerald-950">
-            <Smartphone className="w-5 h-5 text-[#D97706]" />
-            <h2 className="font-serif text-base font-bold">Passerelles Mobile Money</h2>
+            <ScrollText className="w-5 h-5 text-emerald-700" />
+            <h2 className="font-serif text-base font-bold">Sécurité &amp; Traçabilité</h2>
           </div>
           <p className="text-xs text-slate-600 leading-relaxed">
-            Les règlements locatifs sont encaissés via les passerelles Mobile Money agréées,
-            séquestrés jusqu'à la signature authentique du bail puis reversés au propriétaire selon la
-            répartition commissions VFC / reversement propriétaire.
+            Les accès sont protégés par une authentification JWT — jeton d'accès gardé en mémoire,
+            jeton de rafraîchissement en cookie httpOnly — et un contrôle d'accès par rôle (RBAC).
           </p>
-          <ul className="flex flex-wrap gap-2">
-            {MOBILE_MONEY_PROVIDERS.map((provider) => (
-              <li
-                key={provider}
-                className="px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-100 text-[11px] font-semibold text-emerald-900"
-              >
-                {provider}
-              </li>
-            ))}
-          </ul>
+          <p className="text-xs text-slate-600 leading-relaxed">
+            Chaque action sensible — confirmation de visite, modération d'annonce, changement de rôle
+            ou suspension de compte — est horodatée dans le journal d'audit consultable ci-dessus.
+          </p>
         </section>
       </div>
     </div>

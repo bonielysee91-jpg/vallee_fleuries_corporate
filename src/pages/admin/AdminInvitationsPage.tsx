@@ -14,6 +14,7 @@ import {
   Send,
   ShieldOff,
   Ticket,
+  Trash2,
   X,
   type LucideIcon
 } from 'lucide-react';
@@ -38,6 +39,7 @@ const STATUS_META: Record<InvitationStatus, { label: string; className: string; 
 /** `/admin/invitations` — émission et suivi des invitations au Command Center. */
 export const AdminInvitationsPage: React.FC = () => {
   const addNotification = useAppStore((state) => state.addNotification);
+  const openConfirmation = useAppStore((state) => state.openConfirmation);
 
   const [invitations, setInvitations] = useState<AdminInvitation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -114,18 +116,46 @@ export const AdminInvitationsPage: React.FC = () => {
     }
   };
 
-  const handleRevoke = async (invitation: AdminInvitation) => {
-    if (!window.confirm(`Révoquer l'invitation de ${invitation.email} ?`)) return;
-    setBusyId(invitation.id);
-    try {
-      const updated = await api.adminRevokeInvitation(invitation.id);
-      setInvitations((prev) => prev.map((item) => (item.id === invitation.id ? updated : item)));
-      addNotification(`Invitation de ${updated.email} révoquée`, 'success');
-    } catch (err: any) {
-      addNotification(err?.message || 'Révocation impossible', 'error');
-    } finally {
-      setBusyId(null);
-    }
+  const handleRevoke = (invitation: AdminInvitation) => {
+    openConfirmation({
+      title: 'Révoquer l\'invitation',
+      message: `Voulez-vous révoquer l'invitation émise pour « ${invitation.email} » ?\n\nLe lien d'activation associé sera immédiatement invalidé.`,
+      confirmLabel: 'Révoquer',
+      variant: 'warning',
+      onConfirm: async () => {
+        setBusyId(invitation.id);
+        try {
+          const updated = await api.adminRevokeInvitation(invitation.id);
+          setInvitations((prev) => prev.map((item) => (item.id === invitation.id ? updated : item)));
+          addNotification(`Invitation de ${updated.email} révoquée`, 'success');
+        } catch (err: any) {
+          addNotification(err?.message || 'Révocation impossible', 'error');
+        } finally {
+          setBusyId(null);
+        }
+      }
+    });
+  };
+
+  const handleDelete = (invitation: AdminInvitation) => {
+    openConfirmation({
+      title: 'Supprimer définitivement l\'invitation',
+      message: `Supprimer définitivement l'invitation de « ${invitation.email} » ?\n\nCette action est irréversible.`,
+      confirmLabel: 'Supprimer',
+      variant: 'danger',
+      onConfirm: async () => {
+        setBusyId(invitation.id);
+        try {
+          await api.adminDeleteInvitation(invitation.id);
+          setInvitations((prev) => prev.filter((item) => item.id !== invitation.id));
+          addNotification(`Invitation de ${invitation.email} supprimée`, 'success');
+        } catch (err: any) {
+          addNotification(err?.message || 'Suppression impossible', 'error');
+        } finally {
+          setBusyId(null);
+        }
+      }
+    });
   };
 
   const copyCode = async (code: string) => {
@@ -379,24 +409,38 @@ export const AdminInvitationsPage: React.FC = () => {
                     <td className="p-3.5 text-slate-500 whitespace-nowrap">
                       {new Date(invitation.expiresAt).toLocaleDateString('fr-FR')}
                     </td>
-                    <td className="p-3.5 text-right">
-                      {invitation.status === 'PENDING' ? (
+                    <td className="p-3.5">
+                      <div className="flex items-center justify-end gap-2">
+                        {invitation.status === 'PENDING' && (
+                          <button
+                            type="button"
+                            disabled={busyId === invitation.id}
+                            onClick={() => handleRevoke(invitation)}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-semibold shadow-sm transition-colors disabled:opacity-50"
+                          >
+                            {busyId === invitation.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <ShieldOff className="w-3.5 h-3.5" />
+                            )}
+                            Révoquer
+                          </button>
+                        )}
                         <button
                           type="button"
                           disabled={busyId === invitation.id}
-                          onClick={() => handleRevoke(invitation)}
-                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-semibold shadow-sm transition-colors disabled:opacity-50"
+                          onClick={() => handleDelete(invitation)}
+                          title="Supprimer définitivement l'invitation"
+                          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-rose-100 text-slate-600 hover:text-rose-700 text-[11px] font-semibold transition-colors disabled:opacity-50"
                         >
                           {busyId === invitation.id ? (
                             <Loader2 className="w-3.5 h-3.5 animate-spin" />
                           ) : (
-                            <ShieldOff className="w-3.5 h-3.5" />
+                            <Trash2 className="w-3.5 h-3.5" />
                           )}
-                          Révoquer
+                          Supprimer
                         </button>
-                      ) : (
-                        <span className="text-[11px] text-slate-400">—</span>
-                      )}
+                      </div>
                     </td>
                   </tr>
                 );

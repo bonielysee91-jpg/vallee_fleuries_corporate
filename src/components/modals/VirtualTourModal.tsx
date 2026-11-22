@@ -1,10 +1,14 @@
 import React, { useState } from 'react';
 import { useAppStore } from '../../store/useAppStore.ts';
+import { useShallow } from 'zustand/react/shallow';
 import { VFC_MEDIA } from '../../constants/media.ts';
 import { X, Compass, RotateCw, ZoomIn, ZoomOut, Maximize2, Layers } from 'lucide-react';
 
 export const VirtualTourModal: React.FC = () => {
-  const { isVirtualTourOpen, closeVirtualTour } = useAppStore();
+  const { isVirtualTourOpen, closeVirtualTour } = useAppStore(useShallow((s) => ({
+    isVirtualTourOpen: s.isVirtualTourOpen,
+    closeVirtualTour: s.closeVirtualTour,
+  })));
   const [activeRoom, setActiveRoom] = useState<'SALON' | 'MASTER' | 'POOL' | 'CUISINE'>('SALON');
   const [rotation, setRotation] = useState(0);
   const [zoom, setZoom] = useState(1);

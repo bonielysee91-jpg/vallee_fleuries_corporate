@@ -1,6 +1,6 @@
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useAuth } from '../auth/AuthProvider.tsx';
+import { useAuth } from '../auth/useAuth.ts';
 import { useAppStore } from '../../store/useAppStore.ts';
 import { Home, Search, Heart, User } from 'lucide-react';
 

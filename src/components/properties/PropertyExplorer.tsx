@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useAppStore } from '../../store/useAppStore.ts';
+import { useShallow } from 'zustand/react/shallow';
 import { api, formatFcfa } from '../../services/api.ts';
 import { Property, FilterState } from '../../types/index.ts';
-import { FALLBACK_PROPERTY_IMAGE } from '../../constants/media.ts';
+import { FALLBACK_PROPERTY_IMAGE, optimizedImageUrl } from '../../constants/media.ts';
 import { 
   Search, SlidersHorizontal, MapPin, Zap, Droplets, Shield, 
   Bed, Bath, Maximize, Heart, ArrowUpRight, Compass, Layers, Check, Phone
@@ -10,23 +11,55 @@ import {
 import { VFC_WHATSAPP_NUMBER, VFC_WHATSAPP_DISPLAY } from '../../constants/contact.ts';
 
 export const PropertyExplorer: React.FC = () => {
-  const { filters, setFilters, resetFilters, setSelectedPropertyId, setView, favorites, toggleFavorite, openVisitModal } = useAppStore();
+  const { filters, setFilters, resetFilters, setSelectedPropertyId, setView, favorites, toggleFavorite, openVisitModal } =
+    useAppStore(useShallow((s) => ({
+      filters: s.filters,
+      setFilters: s.setFilters,
+      resetFilters: s.resetFilters,
+      setSelectedPropertyId: s.setSelectedPropertyId,
+      setView: s.setView,
+      favorites: s.favorites,
+      toggleFavorite: s.toggleFavorite,
+      openVisitModal: s.openVisitModal,
+    })));
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeHoveredId, setActiveHoveredId] = useState<string | null>(null);
   const [selectedMapPin, setSelectedMapPin] = useState<Property | null>(null);
   const [mapZoom, setMapZoom] = useState(1);
   const [mapCenter, setMapCenter] = useState({ lat: 5.34, lng: -3.98 });
+  // Saisie de recherche locale : l'input reste instantané, seule la requête (via le store)
+  // est différée après un court temps d'inactivité — fini les requêtes à chaque frappe.
+  const [searchInput, setSearchInput] = useState(filters.searchQuery || '');
+  const [mobileTab, setMobileTab] = useState<'LIST' | 'MAP'>('LIST');
+
+  // Resynchronise la saisie locale si la requête du store change ailleurs (ex. réinitialisation).
+  useEffect(() => {
+    setSearchInput(filters.searchQuery || '');
+  }, [filters.searchQuery]);
+
+  // Anti-rebond : on ne pousse la requête dans le store qu'après 350 ms sans frappe.
+  useEffect(() => {
+    if ((filters.searchQuery || '') === searchInput) return;
+    const handle = setTimeout(() => setFilters({ searchQuery: searchInput }), 350);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchInput]);
 
   useEffect(() => {
+    // Garde anti-réponse obsolète : une requête plus ancienne (filtre précédent) ne doit
+    // jamais écraser l'affichage de la plus récente.
+    let cancelled = false;
     setLoading(true);
     api.getProperties({ ...filters, available: true } as any).then((data) => {
+      if (cancelled) return;
       setProperties(data);
-      if (data.length > 0 && !selectedMapPin) {
-        setSelectedMapPin(data[0]);
-      }
+      setSelectedMapPin((current) => current ?? data[0] ?? null);
       setLoading(false);
     });
+    return () => {
+      cancelled = true;
+    };
   }, [filters]);
 
   const handleSelectProperty = (prop: Property) => {
@@ -47,8 +80,8 @@ export const PropertyExplorer: React.FC = () => {
             <input
               type="text"
               placeholder="Rechercher par mot-clé, commune (ex: Cocody, Plateau, Assinie)..."
-              value={filters.searchQuery || ''}
-              onChange={(e) => setFilters({ searchQuery: e.target.value })}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
               className="w-full pl-10 pr-4 py-2 text-xs rounded-xl border border-slate-200/90 bg-white/80 focus:outline-none focus:ring-2 focus:ring-emerald-700"
             />
           </div>
@@ -57,8 +90,8 @@ export const PropertyExplorer: React.FC = () => {
           <div className="flex items-center gap-1 overflow-x-auto pb-1 lg:pb-0">
             {[
               { id: 'ALL', label: 'Toutes les maisons' },
-              { id: 'SALE', label: 'À Vendre' },
-              { id: 'LONG_TERM_RENT', label: 'À Louer' },
+              { id: 'SALE', label: 'Vente' },
+              { id: 'LONG_TERM_RENT', label: 'Location' },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -133,7 +166,7 @@ export const PropertyExplorer: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         
         {/* Left Column: Properties Grid */}
-        <div className="lg:col-span-7 space-y-6">
+        <div className={`space-y-6 ${mobileTab === 'MAP' ? 'hidden lg:block' : 'block'} lg:col-span-7`}>
           {loading ? (
             <div className="space-y-4">
               {[1, 2, 3].map((i) => (
@@ -175,9 +208,14 @@ export const PropertyExplorer: React.FC = () => {
                   {/* Property Image */}
                   <div className="relative sm:w-64 h-52 sm:h-auto shrink-0 overflow-hidden">
                     <img
-                      src={prop.coverImage || prop.featuredImage || prop.images?.[0]?.url || FALLBACK_PROPERTY_IMAGE}
+                      src={optimizedImageUrl(
+                        prop.coverImage || prop.featuredImage || prop.images?.[0]?.url,
+                        800
+                      ) || FALLBACK_PROPERTY_IMAGE}
                       alt={prop.title}
                       referrerPolicy="no-referrer"
+                      loading="lazy"
+                      decoding="async"
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent sm:hidden" />
@@ -293,7 +331,7 @@ export const PropertyExplorer: React.FC = () => {
         </div>
 
         {/* Right Column: Interactive Map with Animated Emerald FCFA Markers */}
-        <div className="lg:col-span-5 sticky top-28">
+        <div className={`lg:col-span-5 sticky top-28 ${mobileTab === 'LIST' ? 'hidden lg:block' : 'block'}`}>
           <div className="liquid-glass rounded-3xl p-4 border border-white/60 shadow-2xl overflow-hidden space-y-4">
             
             <div className="flex items-center justify-between pb-2 border-b border-slate-200/70 text-xs">
@@ -393,9 +431,14 @@ export const PropertyExplorer: React.FC = () => {
                   className="absolute bottom-4 left-4 right-4 liquid-glass-card bg-white/95 rounded-xl p-3 shadow-2xl border border-white/80 cursor-pointer flex items-center gap-3 animate-in fade-in slide-in-from-bottom-2"
                 >
                   <img
-                    src={selectedMapPin.coverImage || selectedMapPin.featuredImage || selectedMapPin.images?.[0]?.url || FALLBACK_PROPERTY_IMAGE}
+                    src={optimizedImageUrl(
+                      selectedMapPin.coverImage || selectedMapPin.featuredImage || selectedMapPin.images?.[0]?.url,
+                      200
+                    ) || FALLBACK_PROPERTY_IMAGE}
                     alt={selectedMapPin.title}
                     referrerPolicy="no-referrer"
+                    loading="lazy"
+                    decoding="async"
                     className="w-16 h-16 rounded-lg object-cover shrink-0"
                   />
                   <div className="flex-1 min-w-0">
@@ -436,6 +479,27 @@ export const PropertyExplorer: React.FC = () => {
           </div>
         </div>
 
+      </div>
+
+      {/* Floating Mobile Map/List Toggle (Progressive Disclosure) */}
+      <div className="lg:hidden fixed bottom-20 left-1/2 -translate-x-1/2 z-40">
+        <button
+          type="button"
+          onClick={() => setMobileTab(mobileTab === 'LIST' ? 'MAP' : 'LIST')}
+          className="px-5 py-2.5 rounded-full bg-emerald-950 text-white font-bold text-xs shadow-2xl border border-white/25 flex items-center gap-2 backdrop-blur-xl hover:scale-105 active:scale-95 transition-all cursor-pointer"
+        >
+          {mobileTab === 'LIST' ? (
+            <>
+              <Compass className="w-4 h-4 text-amber-400" />
+              <span>Afficher la carte</span>
+            </>
+          ) : (
+            <>
+              <Layers className="w-4 h-4 text-amber-400" />
+              <span>Afficher la liste ({properties.length})</span>
+            </>
+          )}
+        </button>
       </div>
 
     </div>

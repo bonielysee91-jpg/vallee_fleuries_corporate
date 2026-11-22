@@ -1,20 +1,36 @@
 import React, { useState, useEffect } from 'react';
 import { useAppStore } from '../../store/useAppStore.ts';
+import { useShallow } from 'zustand/react/shallow';
 import { api, formatFcfa } from '../../services/api.ts';
-import { Property, VisitAppointment, RentQuittance } from '../../types/index.ts';
+import { Property, VisitAppointment, VisitStatus } from '../../types/index.ts';
 import { VFC_MEDIA } from '../../constants/media.ts';
 import { PROPERTY_TYPE_OPTIONS, TRANSACTION_TYPE_OPTIONS } from '../../constants/property.ts';
 import { 
-  BarChart3, PlusCircle, FileText, CheckCircle2, Clock, Calendar, 
-  MapPin, ShieldCheck, ArrowRight, Zap, Droplets, Shield, ExternalLink, Printer
+  BarChart3, PlusCircle, CheckCircle2, XCircle, Loader2, Clock, Calendar, 
+  MapPin, ShieldCheck, ArrowRight, Zap, Droplets, Shield, ExternalLink
 } from 'lucide-react';
 
+/** Libellés et couleurs des statuts de visite côté propriétaire. */
+const VISIT_STATUS_STYLES: Record<VisitStatus, { label: string; className: string }> = {
+  PENDING: { label: 'En attente de validation', className: 'bg-amber-100 text-amber-800' },
+  CONFIRMED: { label: 'Visite acceptée', className: 'bg-emerald-100 text-emerald-800' },
+  COMPLETED: { label: 'Visite effectuée', className: 'bg-blue-100 text-blue-800' },
+  CANCELLED: { label: 'Visite refusée', className: 'bg-rose-100 text-rose-700' },
+};
+
 export const LandlordDashboard: React.FC = () => {
-  const { openQuittanceModal, addNotification, setView, visitsRefreshToken } = useAppStore();
-  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'NEW_LISTING' | 'VISITS' | 'QUITTANCES'>('OVERVIEW');
+  const { addNotification, setView, visitsRefreshToken, openConfirmation } =
+    useAppStore(useShallow((s) => ({
+      addNotification: s.addNotification,
+      setView: s.setView,
+      visitsRefreshToken: s.visitsRefreshToken,
+      openConfirmation: s.openConfirmation,
+    })));
+  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'NEW_LISTING' | 'VISITS'>('OVERVIEW');
   const [properties, setProperties] = useState<Property[]>([]);
   const [visits, setVisits] = useState<VisitAppointment[]>([]);
-  const [quittances, setQuittances] = useState<RentQuittance[]>([]);
+  /** Identifiant de la visite en cours de traitement (acceptation / refus). */
+  const [busyVisitId, setBusyVisitId] = useState<string | null>(null);
 
   // Wizard State (Steps 1 to 4)
   const [wizardStep, setWizardStep] = useState(1);
@@ -36,7 +52,7 @@ export const LandlordDashboard: React.FC = () => {
     furnishing: 'UNFURNISHED',
     description: '',
     featuredImage: VFC_MEDIA.modernVilla,
-    hasBackupGenerator: true,
+    hasGenerator: true,
     hasWaterReserve: true,
     hasSecurity247: true,
     hasSwimmingPool: true,
@@ -45,7 +61,6 @@ export const LandlordDashboard: React.FC = () => {
 
   useEffect(() => {
     api.getProperties().then(setProperties);
-    api.getQuittances().then(setQuittances);
   }, []);
 
   // Recharge le carnet de rendez-vous dès qu'une visite est confirmée (signal global du store).
@@ -66,6 +81,46 @@ export const LandlordDashboard: React.FC = () => {
     }
   };
 
+  /** Décision du propriétaire : accepte (CONFIRMED) ou refuse (CANCELLED) une demande de visite. */
+  const handleVisitDecision = (visitId: string, status: VisitStatus) => {
+    const isConfirming = status === 'CONFIRMED';
+    openConfirmation({
+      title: isConfirming ? 'Valider la demande de visite' : 'Refuser la demande de visite',
+      message: isConfirming
+        ? 'Confirmez-vous la visite de ce bien aux date et heure demandées ? Vous pouvez joindre un message ou des consignes pour le client.'
+        : 'Indiquez le motif du refus ou de l\'indisponibilité à transmettre au client :',
+      confirmLabel: isConfirming ? 'Valider la visite' : 'Refuser la visite',
+      cancelLabel: 'Annuler',
+      variant: isConfirming ? 'info' : 'danger',
+      inputPlaceholder: isConfirming
+        ? 'Message facultatif (ex: Sonner à l\'interphone Villa 12)'
+        : 'Motif du refus (ex: Bien déjà loué, propriétaire en déplacement)',
+      onConfirm: async (adminMessage) => {
+        setBusyVisitId(visitId);
+        try {
+          const updated = await api.updateVisitStatus(visitId, status, undefined, adminMessage?.trim() || undefined);
+          setVisits((prev) => prev.map((v) => (v.id === visitId ? updated : v)));
+          addNotification(
+            isConfirming
+              ? 'Visite acceptée — le client a été notifié de la confirmation.'
+              : 'Visite refusée — le client a été notifié.',
+            isConfirming ? 'success' : 'warning'
+          );
+        } catch (err: any) {
+          addNotification(err.message || 'Erreur lors de la mise à jour de la visite', 'error');
+        } finally {
+          setBusyVisitId(null);
+        }
+      }
+    });
+  };
+
+  const pendingVisits = visits.filter((v) => v.status === 'PENDING').length;
+  const totalRentSecured = properties
+    .filter((p) => p.category === 'LONG_TERM_RENT' || p.category === 'SHORT_TERM_FURNISHED')
+    .reduce((sum, p) => sum + (p.priceFcfa || 0), 0);
+  const activePublishedCount = properties.filter((p) => p.status === 'PUBLISHED' || p.status === 'AVAILABLE').length;
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
       
@@ -79,19 +134,11 @@ export const LandlordDashboard: React.FC = () => {
             Portefeuille Patrimonial VFC
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Supervision des baux, encaissement loyers Wave / Orange Money et conformité Loi N° 2019-576.
+            Supervision des baux, suivi des annonces et conformité Loi N° 2019-576.
           </p>
         </div>
 
         <div className="flex items-center gap-3">
-          <button
-            onClick={openQuittanceModal}
-            className="px-4 py-2.5 rounded-xl bg-white border border-slate-200/90 text-slate-800 hover:text-emerald-900 text-xs font-semibold shadow-sm flex items-center gap-2 cursor-pointer"
-          >
-            <FileText className="w-4 h-4 text-emerald-700" />
-            <span>Générer Quittance Loyer</span>
-          </button>
-
           <button
             onClick={() => setActiveTab('NEW_LISTING')}
             className="px-4 py-2.5 rounded-xl bg-emerald-900 hover:bg-emerald-800 text-white text-xs font-semibold shadow-md flex items-center gap-2 cursor-pointer"
@@ -124,14 +171,6 @@ export const LandlordDashboard: React.FC = () => {
           </span>
         </button>
         <button
-          onClick={() => setActiveTab('QUITTANCES')}
-          className={`px-4 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-            activeTab === 'QUITTANCES' ? 'bg-emerald-900 text-white' : 'text-slate-600 hover:text-slate-900'
-          }`}
-        >
-          Registre des Quittances
-        </button>
-        <button
           onClick={() => setActiveTab('NEW_LISTING')}
           className={`px-4 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
             activeTab === 'NEW_LISTING' ? 'bg-emerald-900 text-white' : 'text-slate-600 hover:text-slate-900'
@@ -145,55 +184,52 @@ export const LandlordDashboard: React.FC = () => {
       {activeTab === 'OVERVIEW' && (
         <div className="space-y-8">
           
-          {/* KPI Analytics Cards */}
+          {/* Real Live KPI Analytics Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="p-5 rounded-2xl liquid-glass-card border border-white/60">
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
-                Loyers Mensuels Sécurisés
+                Loyers Mensuels Gérés
               </span>
-              <div className="text-2xl font-black font-mono text-emerald-950 mt-1 tabular-nums">
-                24 850 000 FCFA
+              <div className="text-xl sm:text-2xl font-black font-mono text-emerald-950 mt-1 tabular-nums">
+                {formatFcfa(totalRentSecured)}
               </div>
               <span className="text-[10px] text-emerald-700 font-semibold mt-1 block">
-                +12% par rapport au mois précédent
+                Total des biens locatifs actifs
               </span>
             </div>
 
             <div className="p-5 rounded-2xl liquid-glass-card border border-white/60">
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
-                Taux d'Occupation Global
+                Biens Publiés &amp; Visibles
               </span>
-              <div className="text-2xl font-black font-mono text-emerald-950 mt-1 tabular-nums">
-                96.4 %
+              <div className="text-xl sm:text-2xl font-black font-mono text-emerald-950 mt-1 tabular-nums">
+                {activePublishedCount} / {properties.length}
               </div>
               <span className="text-[10px] text-emerald-700 font-semibold mt-1 block">
-                Cocody & Plateau à 100%
+                {properties.length > 0
+                  ? `${Math.round((activePublishedCount / properties.length) * 100)} % du portefeuille au catalogue`
+                  : 'Aucun mandat enregistré'}
               </span>
             </div>
 
-            <div className="p-5 rounded-2xl liquid-glass-card border border-white/60">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
-                Visites Guidées ce mois
-              </span>
-              <div className="text-2xl font-black font-mono text-emerald-950 mt-1 tabular-nums">
-                38 rendez-vous
+            <button
+              type="button"
+              onClick={() => setActiveTab('VISITS')}
+              className="text-left p-5 rounded-2xl liquid-glass-card border border-white/60 hover:border-amber-300 transition-all cursor-pointer group"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
+                  Demandes de Visite
+                </span>
+                <ArrowRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 text-amber-600 transition-all" />
               </div>
-              <span className="text-[10px] text-amber-600 font-semibold mt-1 block">
-                {visits.length} en attente de confirmation
-              </span>
-            </div>
-
-            <div className="p-5 rounded-2xl liquid-glass-card border border-white/60">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
-                Dossiers Propriétaires Conformes
-              </span>
-              <div className="text-2xl font-black font-mono text-emerald-950 mt-1 tabular-nums">
-                100 %
+              <div className="text-xl sm:text-2xl font-black font-mono text-emerald-950 mt-1 tabular-nums">
+                {visits.length} rendez-vous
               </div>
-              <span className="text-[10px] text-emerald-700 font-semibold mt-1 block">
-                Mandats locatifs signés & vérifiés
+              <span className={`text-[10px] font-semibold mt-1 block ${pendingVisits > 0 ? 'text-amber-600 font-bold' : 'text-emerald-700'}`}>
+                {pendingVisits > 0 ? `${pendingVisits} en attente de décision` : 'Toutes les visites traitées'}
               </span>
-            </div>
+            </button>
           </div>
 
           {/* Properties Under Management List */}
@@ -280,7 +316,36 @@ export const LandlordDashboard: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {vis.status === 'PENDING' && (
+                    <>
+                      <button
+                        type="button"
+                        disabled={busyVisitId === vis.id}
+                        onClick={() => handleVisitDecision(vis.id, 'CONFIRMED')}
+                        title="Accepter la visite"
+                        className="px-3 py-1.5 rounded-lg bg-emerald-900 hover:bg-emerald-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer disabled:opacity-50"
+                      >
+                        {busyVisitId === vis.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-300" />
+                        ) : (
+                          <CheckCircle2 className="w-3.5 h-3.5 text-amber-300" />
+                        )}
+                        <span>Accepter</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busyVisitId === vis.id}
+                        onClick={() => handleVisitDecision(vis.id, 'CANCELLED')}
+                        title="Refuser la visite"
+                        className="px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        <span>Refuser</span>
+                      </button>
+                    </>
+                  )}
+
                   <a
                     href={vis.whatsAppNotifyUrl}
                     target="_blank"
@@ -290,57 +355,9 @@ export const LandlordDashboard: React.FC = () => {
                     <span>Contacter WhatsApp</span>
                     <ExternalLink className="w-3 h-3" />
                   </a>
-                  <span className="px-2.5 py-1 rounded bg-emerald-100 text-emerald-800 text-[11px] font-bold">
-                    {vis.status}
+                  <span className={`px-2.5 py-1 rounded text-[11px] font-bold ${VISIT_STATUS_STYLES[vis.status].className}`}>
+                    {VISIT_STATUS_STYLES[vis.status].label}
                   </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* TAB 3: REGISTER DES QUITTANCES */}
-      {activeTab === 'QUITTANCES' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-bold text-emerald-950 font-serif">
-              Registre Officiel des Quittances de Loyer Émises
-            </h3>
-            <button
-              onClick={openQuittanceModal}
-              className="px-3.5 py-1.5 rounded-xl bg-emerald-900 text-white text-xs font-semibold flex items-center gap-1.5"
-            >
-              <PlusCircle className="w-3.5 h-3.5" />
-              <span>Éditer Nouvelle Quittance</span>
-            </button>
-          </div>
-
-          <div className="divide-y divide-slate-100 rounded-2xl liquid-glass border border-white/60 overflow-hidden shadow-sm">
-            {quittances.map((qt) => (
-              <div key={qt.id} className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-white/50">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="font-mono font-bold text-emerald-900">{qt.quittanceNumber}</span>
-                    <span aria-hidden="true">·</span>
-                    <span className="font-semibold text-slate-800">{qt.periodMonth}</span>
-                    <span aria-hidden="true">·</span>
-                    <span className="text-slate-500">Locataire : {qt.tenantName}</span>
-                  </div>
-                  <h4 className="text-sm font-bold text-slate-900">{qt.propertyTitle}</h4>
-                  <div className="text-xs font-mono text-emerald-950">
-                    Total Quittancé : <strong>{formatFcfa(qt.totalPaidFcfa || 0)}</strong> (Loyer {formatFcfa(qt.baseRentFcfa || qt.rentAmountFcfa || 0)} + Charges {formatFcfa(qt.chargesFcfa || 0)})
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={openQuittanceModal}
-                    className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold flex items-center gap-1.5"
-                  >
-                    <Printer className="w-3.5 h-3.5" />
-                    <span>Réimprimer</span>
-                  </button>
                 </div>
               </div>
             ))}

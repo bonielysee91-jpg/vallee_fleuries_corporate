@@ -15,12 +15,9 @@ import {
   Booking,
   LeaseAgreement,
   MoveInCostBreakdown,
-  PaymentMethod,
   Property,
-  QuittanceLoyer,
-  Transaction,
-  TransactionPurpose,
   VisitAppointment,
+  VisitStatus,
 } from '../types/index.ts';
 import {
   isAllowedPropertyType,
@@ -47,50 +44,16 @@ const visitInclude = {
   tenant: true,
 } satisfies Prisma.VisitAppointmentInclude;
 
-const transactionInclude = { property: true } satisfies Prisma.TransactionInclude;
-
 type PropertyRow = Prisma.PropertyGetPayload<{ include: typeof propertyInclude }>;
 type BookingRow = Prisma.BookingGetPayload<{ include: typeof bookingInclude }>;
 type VisitRow = Prisma.VisitAppointmentGetPayload<{ include: typeof visitInclude }>;
-type TransactionRow = Prisma.TransactionGetPayload<{ include: typeof transactionInclude }>;
 type LeaseRow = Prisma.LeaseAgreementGetPayload<{
   include: { property: true; tenant: true; owner: true };
 }>;
-type QuittanceRow = Prisma.QuittanceGetPayload<Record<string, never>>;
 
 // -------------------------------------------------------------
 // ENUM NORMALISERS (arbitrary client strings → strict DB enums)
 // -------------------------------------------------------------
-const PAYMENT_METHODS: PaymentMethod[] = [
-  'WAVE',
-  'ORANGE_MONEY',
-  'MTN_MOMO',
-  'MOOV_MONEY',
-  'CARD_CINETPAY',
-  'CARD_PAYSTACK',
-  'BANK_TRANSFER',
-];
-
-function toPaymentMethod(value: unknown): PaymentMethod {
-  const candidate = String(value ?? '').toUpperCase().replace(/\s+/g, '_');
-  return (PAYMENT_METHODS as string[]).includes(candidate) ? (candidate as PaymentMethod) : 'WAVE';
-}
-
-const TRANSACTION_PURPOSES: TransactionPurpose[] = [
-  'SHORT_STAY_BOOKING',
-  'MOVE_IN_PACKAGE',
-  'MONTHLY_RENT',
-  'VISIT_FEE',
-  'SECURITY_DEPOSIT',
-];
-
-function toTransactionPurpose(value: unknown): TransactionPurpose {
-  const candidate = String(value ?? '').toUpperCase().replace(/\s+/g, '_');
-  return (TRANSACTION_PURPOSES as string[]).includes(candidate)
-    ? (candidate as TransactionPurpose)
-    : 'MOVE_IN_PACKAGE';
-}
-
 function slugify(value: string): string {
   return value
     .toLowerCase()
@@ -104,6 +67,28 @@ function randomRef(prefix: string, width: number): string {
   return `${prefix}${Math.floor(Math.random() * Math.pow(10, width))
     .toString()
     .padStart(width, '0')}`;
+}
+
+// -------------------------------------------------------------
+// EXPOSITION DES VISUELS
+// -------------------------------------------------------------
+/**
+ * Les photos téléversées sont stockées en base sous forme de data-URL base64.
+ * Les renvoyer telles quelles dans le JSON alourdirait chaque réponse de plusieurs
+ * mégaoctets (l'image est re-téléchargée à chaque chargement de page et ne peut pas
+ * être mise en cache). On expose donc une URL stable, servie binairement et
+ * fortement cacheable par `GET /api/images/:id`.
+ */
+const PUBLIC_IMAGE_PREFIX = '/api/images/';
+
+function toExposedImageUrl(image: { id: string; url: string } | undefined): string | undefined {
+  if (!image) return undefined;
+  return image.url.startsWith('data:') ? `${PUBLIC_IMAGE_PREFIX}${image.id}` : image.url;
+}
+
+/** Id de la ligne `PropertyImage` visée par une URL `/api/images/:id` (sinon `null`). */
+function publicImageId(url: string): string | null {
+  return url.startsWith(PUBLIC_IMAGE_PREFIX) ? url.slice(PUBLIC_IMAGE_PREFIX.length) : null;
 }
 
 // -------------------------------------------------------------
@@ -143,17 +128,19 @@ function toDomainProperty(row: PropertyRow): Property {
     totalFloors: row.totalFloors ?? undefined,
     hasElevator: row.hasElevator,
     hasGenerator: row.hasGenerator,
+    // Alias de commodité attendu par les composants d'interface (badges & filtres).
+    hasBackupGenerator: row.hasGenerator,
     hasWaterReserve: row.hasWaterReserve,
     hasSwimmingPool: row.hasSwimmingPool,
     hasSecurity247: row.hasSecurity247,
     hasFiberInternet: row.hasFiberInternet,
-    featuredImage: cover?.url,
-    coverImage: cover?.url,
-    galleryImages: images.map((i) => i.url),
+    featuredImage: toExposedImageUrl(cover),
+    coverImage: toExposedImageUrl(cover),
+    galleryImages: images.map((i) => toExposedImageUrl(i) as string),
     virtualTourUrl: row.virtualTourUrl ?? undefined,
     images: images.map((i) => ({
       id: i.id,
-      url: i.url,
+      url: toExposedImageUrl(i) ?? i.url,
       caption: i.caption ?? undefined,
       isCover: i.isCover,
       displayOrder: i.displayOrder,
@@ -200,7 +187,7 @@ function toDomainBooking(row: BookingRow): Booking {
     propertyId: row.propertyId,
     propertyTitle: row.property?.title,
     propertyCommune: row.property?.commune,
-    propertyImage: cover?.url,
+    propertyImage: toExposedImageUrl(cover),
     tenantId: row.tenantId,
     tenantName: row.tenant?.fullName ?? '',
     tenantPhone: row.tenant?.phoneNumber ?? '',
@@ -239,6 +226,7 @@ function toDomainVisit(row: VisitRow): VisitAppointment {
     visitType: row.type,
     status: row.status,
     notes: row.notes ?? undefined,
+    adminMessage: row.adminMessage ?? undefined,
     whatsAppNotifyUrl: `https://wa.me/${row.whatsappPhone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
       `Confirmation de visite VFC — ${row.property?.title ?? ''} le ${row.visitDate.toISOString().split('T')[0]}`
     )}`,
@@ -261,27 +249,6 @@ function toVisitTypeEnum(raw?: string | null): 'IN_PERSON' | 'VIRTUAL_3D' {
     value.includes('VIRTUEL') ||
     value.includes('DISTANCIEL');
   return isVirtual ? 'VIRTUAL_3D' : 'IN_PERSON';
-}
-
-function toDomainTransaction(row: TransactionRow): Transaction {
-  return {
-    id: row.id,
-    reference: row.reference,
-    amountFcfa: row.amountFcfa,
-    feeFcfa: row.feeFcfa,
-    netAmountFcfa: row.netAmountFcfa,
-    currency: row.currency === 'FCFA' ? 'FCFA' : 'XOF',
-    paymentMethod: row.paymentMethod as PaymentMethod,
-    paymentProvider: row.gatewayReference ?? row.paymentMethod,
-    purpose: row.purpose as TransactionPurpose,
-    status: row.status,
-    payerPhone: row.payerPhone,
-    payerName: row.payerName,
-    clientName: row.payerName,
-    clientPhone: row.payerPhone,
-    propertyTitle: row.property?.title,
-    createdAt: row.createdAt.toISOString(),
-  };
 }
 
 function toDomainLease(row: LeaseRow): LeaseAgreement {
@@ -310,31 +277,6 @@ function toDomainLease(row: LeaseRow): LeaseAgreement {
   };
 }
 
-function toDomainQuittance(row: QuittanceRow): QuittanceLoyer {
-  return {
-    id: row.id,
-    quittanceNumber: row.quittanceNumber,
-    month: row.month,
-    periodMonth: row.month,
-    year: row.year,
-    tenantName: row.tenantName,
-    tenantPhone: row.tenantPhone,
-    ownerName: row.ownerName,
-    landlordName: row.ownerName,
-    propertyTitle: row.propertyTitle,
-    propertyAddress: row.propertyAddress,
-    commune: row.commune,
-    rentAmountFcfa: row.rentAmountFcfa,
-    baseRentFcfa: row.rentAmountFcfa,
-    chargesFcfa: row.chargesFcfa,
-    totalPaidFcfa: row.totalPaidFcfa,
-    paymentDate: row.paymentDate.toISOString().split('T')[0],
-    paymentMethod: row.paymentMethod as PaymentMethod,
-    transactionReference: row.transactionReference,
-    qrCodeVerificationUrl: row.qrCodeVerificationUrl,
-  };
-}
-
 // -------------------------------------------------------------
 // REPOSITORY
 // -------------------------------------------------------------
@@ -348,6 +290,10 @@ export interface PropertyFilters {
   furnishing?: string;
   bedrooms?: string | number;
   searchQuery?: string;
+  /** Filtres d'équipements (Spécificités Abidjan) exposés par l'explorateur public. */
+  hasGenerator?: boolean | string;
+  hasWaterReserve?: boolean | string;
+  hasSecurity247?: boolean | string;
   /** Public catalogue scope: when set, only published / available listings are returned. */
   available?: boolean | string;
 }
@@ -375,6 +321,11 @@ class PrismaRepository {
     if (filters?.bedrooms && String(filters.bedrooms) !== 'ALL') {
       where.bedrooms = { gte: Number(filters.bedrooms) };
     }
+    // Équipements : un filtre coché restreint la sélection aux biens qui les possèdent.
+    const truthy = (value?: boolean | string) => value === true || value === 'true';
+    if (truthy(filters?.hasGenerator)) where.hasGenerator = true;
+    if (truthy(filters?.hasWaterReserve)) where.hasWaterReserve = true;
+    if (truthy(filters?.hasSecurity247)) where.hasSecurity247 = true;
 
     const price: Prisma.IntFilter = {};
     if (filters?.minPrice) price.gte = Number(filters.minPrice);
@@ -414,6 +365,18 @@ class PrismaRepository {
       include: propertyInclude,
     });
     return row ? toDomainProperty(row) : undefined;
+  }
+
+  /**
+   * Visuel brut tel qu'il est stocké (data-URL base64 ou URL distante).
+   * Consommé exclusivement par `GET /api/images/:id`, qui renvoie le binaire.
+   */
+  public async getPropertyImageById(id: string): Promise<string | null> {
+    const row = await prisma.propertyImage.findUnique({
+      where: { id },
+      select: { url: true },
+    });
+    return row?.url ?? null;
   }
 
   public async addProperty(
@@ -580,16 +543,28 @@ class PrismaRepository {
 
     // Galerie photo : l'enregistrement remplace intégralement la collection (ordre + couverture).
     if (data.images !== undefined) {
+      // Les visuels déjà en base sont renvoyés au client sous forme d'URL `/api/images/:id`
+      // (voir toExposedImageUrl) : il faut les retraduire vers la data-URL réellement stockée
+      // avant de réécrire la collection, puisque les anciennes lignes sont supprimées juste après.
+      const existingImages = await prisma.propertyImage.findMany({
+        where: { propertyId: existing.id },
+        select: { id: true, url: true },
+      });
+      const storedUrlById = new Map(existingImages.map((image) => [image.id, image.url]));
+
       patch.images = {
         deleteMany: {},
         create: (data.images ?? [])
           .filter((image) => Boolean(image?.url))
-          .map((image, index) => ({
-            url: image.url,
-            caption: image.caption ?? null,
-            isCover: Boolean(image.isCover) || index === 0,
-            displayOrder: index,
-          })),
+          .map((image, index) => {
+            const exposedId = publicImageId(image.url);
+            return {
+              url: (exposedId && storedUrlById.get(exposedId)) || image.url,
+              caption: image.caption ?? null,
+              isCover: Boolean(image.isCover) || index === 0,
+              displayOrder: index,
+            };
+          }),
       };
     }
 
@@ -679,6 +654,17 @@ class PrismaRepository {
     return rows.map(toDomainVisit);
   }
 
+  public async deleteVisit(id: string): Promise<VisitAppointment | null> {
+    const existing = await prisma.visitAppointment.findUnique({
+      where: { id },
+      include: visitInclude,
+    });
+    if (!existing) return null;
+
+    await prisma.visitAppointment.delete({ where: { id } });
+    return toDomainVisit(existing);
+  }
+
   public async scheduleVisit(
     data: Partial<VisitAppointment> & { format?: string; date?: string; phone?: string }
   ): Promise<VisitAppointment> {
@@ -693,15 +679,43 @@ class PrismaRepository {
         timeSlot: data.timeSlot || data.scheduledTime || '10:00 - 11:00',
         // Traduction du format du formulaire vers l'énumération Prisma stricte (IN_PERSON / VIRTUAL_3D).
         type: toVisitTypeEnum(data.format || data.visitType || data.type),
-        // Auto-confirmation : l'écran client annonce « Visite Confirmée » et le carnet du
-        // propriétaire ne doit pas rester bloqué sur « en attente » (aucun workflow d'approbation).
-        status: 'CONFIRMED',
+        // Workflow d'approbation : la demande est enregistrée en attente, le propriétaire doit
+        // explicitement l'accepter (CONFIRMED) ou la refuser (CANCELLED) depuis son tableau de bord.
+        status: 'PENDING',
         notes: data.notes || null,
         whatsappPhone,
       },
       include: visitInclude,
     });
     return toDomainVisit(created);
+  }
+
+  public async updateVisitStatus(
+    id: string,
+    status: VisitStatus,
+    notes?: string,
+    adminMessage?: string
+  ): Promise<VisitAppointment> {
+    const updated = await prisma.visitAppointment.update({
+      where: { id },
+      data: {
+        status,
+        ...(notes !== undefined ? { notes } : {}),
+        ...(adminMessage !== undefined ? { adminMessage } : {}),
+      },
+      include: visitInclude,
+    });
+    return toDomainVisit(updated);
+  }
+
+  /** Demandes de visite d'un client donné (espace personnel « Mes demandes de visite »). */
+  public async getVisitsByTenant(tenantId: string): Promise<VisitAppointment[]> {
+    const rows = await prisma.visitAppointment.findMany({
+      where: { tenantId },
+      include: visitInclude,
+      orderBy: { visitDate: 'desc' },
+    });
+    return rows.map(toDomainVisit);
   }
 
   // ---- BOOKINGS (SHORT-STAY FURNISHED RESIDENCES) ----
@@ -750,171 +764,6 @@ class PrismaRepository {
       orderBy: { createdAt: 'desc' },
     });
     return rows.map(toDomainLease);
-  }
-
-  // ---- TRANSACTIONS & MOBILE MONEY ----
-  public async getTransactions(): Promise<Transaction[]> {
-    const rows = await prisma.transaction.findMany({
-      include: transactionInclude,
-      orderBy: { createdAt: 'desc' },
-    });
-    return rows.map(toDomainTransaction);
-  }
-
-  public async processMobileMoneyPayment(payload: {
-    userId: string;
-    phoneNumber: string;
-    provider: string;
-    amountFcfa: number;
-    purpose: string;
-    clientName?: string;
-    propertyTitle?: string;
-    propertyId?: string;
-    bookingId?: string;
-    leaseId?: string;
-  }): Promise<Transaction> {
-    // Le bien est déduit de la réservation ou du bail lorsqu'il n'est pas fourni : c'est ce
-    // rattachement qui permet, à l'encaissement, d'activer le contrat et de sortir le bien du marché.
-    let propertyId = payload.propertyId;
-    if (!propertyId && payload.bookingId) {
-      propertyId = (
-        await prisma.booking.findUnique({
-          where: { id: payload.bookingId },
-          select: { propertyId: true },
-        })
-      )?.propertyId;
-    }
-    if (!propertyId && payload.leaseId) {
-      propertyId = (
-        await prisma.leaseAgreement.findUnique({
-          where: { id: payload.leaseId },
-          select: { propertyId: true },
-        })
-      )?.propertyId;
-    }
-
-    const fee = Math.round(payload.amountFcfa * 0.01); // 1 % frais Wave / Orange
-    const created = await prisma.transaction.create({
-      data: {
-        reference: randomRef('TX-VFC-', 8),
-        gatewayReference: payload.provider,
-        userId: payload.userId,
-        propertyId: propertyId ?? null,
-        bookingId: payload.bookingId ?? null,
-        leaseId: payload.leaseId ?? null,
-        amountFcfa: payload.amountFcfa,
-        feeFcfa: fee,
-        netAmountFcfa: payload.amountFcfa - fee,
-        currency: 'XOF',
-        paymentMethod: toPaymentMethod(payload.provider) as Prisma.TransactionCreateInput['paymentMethod'],
-        purpose: toTransactionPurpose(payload.purpose) as Prisma.TransactionCreateInput['purpose'],
-        // 🔒 La transaction naît PENDING : elle ne passe à SUCCESSFUL qu'après confirmation
-        // de l'opérateur (webhook signé → settleTransactionByReference).
-        status: 'PENDING',
-        payerPhone: payload.phoneNumber,
-        payerName: payload.clientName || 'Client VFC',
-      },
-      include: transactionInclude,
-    });
-    return toDomainTransaction(created);
-  }
-
-  // ---- GATEWAY WEBHOOK RECONCILIATION ----
-  // Acknowledges a Mobile Money gateway callback by its transaction reference,
-  // flips the status, stores the raw payload and takes a settled rental off the
-  // market. Backed by the existing Transaction / Property models (no parallel
-  // payment table): reference ← gateway transaction_reference, metadata ← payload.
-  public async settleTransactionByReference(payload: {
-    reference: string;
-    accepted: boolean;
-    gatewayReference?: string;
-    gatewayPayload?: unknown;
-  }): Promise<Transaction | null> {
-    const existing = await prisma.transaction.findUnique({
-      where: { reference: payload.reference },
-    });
-    if (!existing) return null;
-
-    const updated = await prisma.transaction.update({
-      where: { reference: payload.reference },
-      data: {
-        status: payload.accepted ? 'SUCCESSFUL' : 'FAILED',
-        // Référence externe de l'opérateur (Wave / CinetPay / Paystack) transmise par le
-        // callback : elle n'est écrite qu'une fois l'argent réellement encaissé.
-        ...(payload.gatewayReference ? { gatewayReference: payload.gatewayReference } : {}),
-        metadata:
-          payload.gatewayPayload !== undefined
-            ? JSON.stringify(payload.gatewayPayload)
-            : existing.metadata,
-      },
-      include: transactionInclude,
-    });
-
-    // Validation finale : une fois l'argent réellement encaissé, le contrat rattaché est activé.
-    if (payload.accepted) {
-      if (updated.bookingId) {
-        await prisma.booking.update({
-          where: { id: updated.bookingId },
-          data: { status: 'CONFIRMED' },
-        });
-      }
-      if (updated.leaseId) {
-        await prisma.leaseAgreement.update({
-          where: { id: updated.leaseId },
-          data: { status: 'ACTIVE', signedAt: new Date() },
-        });
-      }
-    }
-
-    // The schema has no "sold" state, so only rentals are taken off the market.
-    if (payload.accepted && updated.property && updated.property.category !== 'SALE') {
-      await prisma.property.update({
-        where: { id: updated.property.id },
-        data: { status: 'RENTED' },
-      });
-    }
-
-    return toDomainTransaction(updated);
-  }
-
-  // ---- QUITTANCES DE LOYER ----
-  public async getQuittances(): Promise<QuittanceLoyer[]> {
-    const rows = await prisma.quittance.findMany({ orderBy: { createdAt: 'desc' } });
-    return rows.map(toDomainQuittance);
-  }
-
-  public async generateQuittance(payload: Partial<QuittanceLoyer>): Promise<QuittanceLoyer> {
-    const now = new Date();
-    const rent = Number(payload.rentAmountFcfa) || 500_000;
-    const charges = Number(payload.chargesFcfa) || 0;
-    const number = randomRef(
-      `QUIT-${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-`,
-      4
-    );
-
-    const created = await prisma.quittance.create({
-      data: {
-        quittanceNumber: number,
-        month: payload.month || now.toLocaleDateString('fr-FR', { month: 'long' }),
-        year: payload.year || now.getFullYear(),
-        tenantName: payload.tenantName || 'Locataire VFC',
-        tenantPhone: payload.tenantPhone || '+225 07 00 00 00 00',
-        ownerName: payload.ownerName || 'Propriétaire VFC',
-        propertyTitle: payload.propertyTitle || 'Appartement VFC',
-        propertyAddress: payload.propertyAddress || "Abidjan, Côte d'Ivoire",
-        commune: payload.commune || 'Cocody',
-        rentAmountFcfa: rent,
-        chargesFcfa: charges,
-        totalPaidFcfa: Number(payload.totalPaidFcfa) || rent + charges,
-        paymentDate: new Date(payload.paymentDate || Date.now()),
-        paymentMethod: toPaymentMethod(
-          payload.paymentMethod
-        ) as Prisma.QuittanceCreateInput['paymentMethod'],
-        transactionReference: payload.transactionReference || randomRef('TX-VFC-', 8),
-        qrCodeVerificationUrl: `https://valleesfleuries.ci/verify/quittance/${number}`,
-      },
-    });
-    return toDomainQuittance(created);
   }
 
   // ---- REFERENCE DATA (amenities & Ivorian geography) ----

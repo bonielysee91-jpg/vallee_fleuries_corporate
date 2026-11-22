@@ -3,10 +3,9 @@ import {
   City,
   Property,
   VisitAppointment,
+  VisitStatus,
   Booking,
   LeaseAgreement,
-  Transaction,
-  QuittanceLoyer,
   MoveInCostBreakdown,
   AdminNotification,
   User,
@@ -122,14 +121,6 @@ export interface AuthResult {
   token: string;
 }
 
-/** Retour de l'inscription self-service : le compte est créé mais non encore vérifié. */
-export interface RegisterResult {
-  success: boolean;
-  message: string;
-  requiresVerification: boolean;
-  phoneNumber: string;
-}
-
 export interface AdminUserPage {
   data: User[];
   pagination: { page: number; pageSize: number; total: number; totalPages: number };
@@ -151,8 +142,6 @@ export interface AdminStats {
   properties: number;
   bookings: number;
   activeSessions: number;
-  transactionVolumeFcfa: number;
-  commissionRevenueFcfa: number;
 }
 
 export type InvitationStatus = 'PENDING' | 'ACCEPTED' | 'REVOKED' | 'EXPIRED';
@@ -227,8 +216,8 @@ export const api = {
   },
 
   /**
-   * Inscription self-service : le compte est créé au statut « non vérifié ».
-   * Aucun jeton n'est délivré tant que le code SMS n'a pas été confirmé.
+   * Inscription self-service : le compte est actif immédiatement et la session
+   * s'ouvre dès la création — aucune vérification par SMS n'est demandée.
    */
   async registerUser(userData: {
     fullName: string;
@@ -237,43 +226,10 @@ export const api = {
     password?: string;
     role?: UserRole;
     companyName?: string;
-  }): Promise<RegisterResult> {
-    return request<RegisterResult>('/auth/register', {
+  }): Promise<AuthResult> {
+    const json = await request<AuthResult & { success: boolean }>('/auth/register', {
       method: 'POST',
       body: userData
-    });
-  },
-
-  /** Valide le code reçu par SMS et active la session en cas de succès. */
-  async verifyRegistration(phoneNumber: string, code: string): Promise<AuthResult> {
-    const json = await request<AuthResult & { success: boolean }>('/auth/register/verify', {
-      method: 'POST',
-      body: { phoneNumber, code }
-    });
-    setAccessToken(json.token);
-    return { user: json.user, token: json.token };
-  },
-
-  /** Renvoie un nouveau code si le compte n'est pas encore vérifié. */
-  async resendRegistrationCode(
-    phoneNumber: string
-  ): Promise<{ success: boolean; message: string }> {
-    return request('/auth/register/resend', { method: 'POST', body: { phoneNumber } });
-  },
-
-  async sendSmsOtp(phoneNumber: string): Promise<{ success: boolean }> {
-    return request('/auth/otp/send', { method: 'POST', body: { phoneNumber } });
-  },
-
-  async verifySmsOtp(
-    phoneNumber: string,
-    code: string,
-    fullName?: string,
-    role?: UserRole
-  ): Promise<AuthResult> {
-    const json = await request<AuthResult & { success: boolean }>('/auth/otp/verify', {
-      method: 'POST',
-      body: { phoneNumber, code, fullName, role }
     });
     setAccessToken(json.token);
     return { user: json.user, token: json.token };
@@ -312,6 +268,23 @@ export const api = {
     } finally {
       setAccessToken(null);
     }
+  },
+
+  /**
+   * Change le mot de passe du compte connecté. Le mot de passe actuel est
+   * revérifié côté serveur avant tout enregistrement ; le nouveau est re-haché
+   * (PBKDF2). La session courante reste valide — aucune reconnexion imposée.
+   */
+  async changePassword(payload: {
+    currentPassword: string;
+    newPassword: string;
+    confirmNewPassword: string;
+  }): Promise<{ message: string }> {
+    const json = await request<{ success: boolean; message: string }>('/auth/change-password', {
+      method: 'POST',
+      body: payload
+    });
+    return { message: json.message };
   },
 
   // -----------------------------------------------------------
@@ -462,6 +435,33 @@ export const api = {
     return json.data;
   },
 
+  async adminDeleteVisit(visitId: string): Promise<string> {
+    const json = await request<{ data: { id: string } }>(
+      `/admin/visits/${encodeURIComponent(visitId)}`,
+      { method: 'DELETE' }
+    );
+    return json.data.id;
+  },
+
+  /** Espace client : uniquement les demandes de visite de l'utilisateur connecté. */
+  async getMyVisits(): Promise<VisitAppointment[]> {
+    const json = await request<{ data: VisitAppointment[] }>('/visits/mine');
+    return json.data;
+  },
+
+  async updateVisitStatus(
+    visitId: string,
+    status: VisitStatus,
+    notes?: string,
+    adminMessage?: string
+  ): Promise<VisitAppointment> {
+    const json = await request<{ data: VisitAppointment }>(`/visits/${visitId}/status`, {
+      method: 'PATCH',
+      body: { status, notes, adminMessage }
+    });
+    return json.data;
+  },
+
   // -----------------------------------------------------------
   // BOOKINGS (SHORT-STAY FURNISHED RESIDENCES)
   // -----------------------------------------------------------
@@ -480,92 +480,6 @@ export const api = {
 
   async getLeases(): Promise<LeaseAgreement[]> {
     const json = await request<{ data: LeaseAgreement[] }>('/leases');
-    return json.data;
-  },
-
-  // -----------------------------------------------------------
-  // PAYMENTS & MOBILE MONEY (WAVE, ORANGE, MTN, MOOV)
-  // -----------------------------------------------------------
-  /**
-   * Envoie par SMS le code à valider AVANT toute exécution du débit.
-   * Le code n'est jamais renvoyé au navigateur.
-   */
-  async requestPaymentCode(payload: {
-    phoneNumber: string;
-  }): Promise<{
-    success: boolean;
-    /** `false` quand aucune passerelle SMS n'est configurée : le débit se fait sans code. */
-    codeRequired?: boolean;
-    message: string;
-    expiresAt?: string;
-  }> {
-    return request('/payments/confirm-code', { method: 'POST', body: payload });
-  },
-
-  async initiatePayment(payload: {
-    phoneNumber: string;
-    provider: string;
-    amountFcfa: number;
-    purpose: string;
-    clientName?: string;
-    propertyTitle?: string;
-    /** Rattachement optionnel au contrat : activé automatiquement à l'encaissement. */
-    propertyId?: string;
-    bookingId?: string;
-    leaseId?: string;
-    /** Code de validation reçu par SMS — obligatoire : sans lui, aucun débit n'est exécuté. */
-    confirmationCode: string;
-  }): Promise<Transaction & { paymentUrl?: string | null }> {
-    const json = await request<{ data: Transaction & { paymentUrl?: string | null } }>(
-      '/payments/initiate',
-      {
-        method: 'POST',
-        body: payload
-      }
-    );
-    return json.data;
-  },
-
-  async getTransactions(): Promise<Transaction[]> {
-    const json = await request<{ success: boolean; data: Transaction[] }>('/transactions');
-    return json.data;
-  },
-
-  /**
-   * Récupère le grand livre des transactions en CSV. Le fichier est protégé par jeton :
-   * un simple lien ne fonctionnerait pas, il faut donc le charger puis le télécharger.
-   */
-  async exportPaymentsCsv(): Promise<Blob> {
-    const send = () =>
-      fetch(`${API_BASE}/admin/payments/export`, {
-        method: 'GET',
-        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
-        credentials: 'include',
-      });
-
-    let res = await send();
-    if (res.status === 401 && (await rotateRefreshToken())) {
-      res = await send();
-    }
-    if (!res.ok) {
-      throw new ApiError("Export du grand livre impossible", res.status);
-    }
-    return res.blob();
-  },
-
-  // -----------------------------------------------------------
-  // QUITTANCES DE LOYER
-  // -----------------------------------------------------------
-  async generateQuittance(payload: Partial<QuittanceLoyer>): Promise<QuittanceLoyer> {
-    const json = await request<{ data: QuittanceLoyer }>('/quittances/generate', {
-      method: 'POST',
-      body: payload
-    });
-    return json.data;
-  },
-
-  async getQuittances(): Promise<QuittanceLoyer[]> {
-    const json = await request<{ data: QuittanceLoyer[] }>('/quittances');
     return json.data;
   },
 
@@ -613,20 +527,15 @@ export const api = {
     return json.data;
   },
 
-  async adminUpdatePropertyStatus(id: string, status: Property['status']): Promise<Property> {
+  async adminUpdatePropertyStatus(
+    id: string,
+    status: Property['status'],
+    reason?: string
+  ): Promise<Property> {
     const json = await request<{ data: Property }>(
       `/admin/properties/${encodeURIComponent(id)}/status`,
-      { method: 'PATCH', body: { status } }
+      { method: 'PATCH', body: { status, reason } }
     );
-    return json.data;
-  },
-
-  async adminGetTransactions(): Promise<
-    (Transaction & { commissionFcfa: number; ownerPayoutFcfa: number })[]
-  > {
-    const json = await request<{
-      data: (Transaction & { commissionFcfa: number; ownerPayoutFcfa: number })[];
-    }>('/admin/transactions');
     return json.data;
   },
 
@@ -636,6 +545,23 @@ export const api = {
   }> {
     const query = params ? new URLSearchParams(params as Record<string, string>).toString() : '';
     return request(`/admin/audit-logs?${query}`);
+  },
+
+  /** Suppression d'une entrée du journal d'audit. */
+  async adminDeleteAuditLog(id: string): Promise<string> {
+    const json = await request<{ data: { id: string } }>(
+      `/admin/audit-logs/${encodeURIComponent(id)}`,
+      { method: 'DELETE' }
+    );
+    return json.data.id;
+  },
+
+  /** Purge complète du journal d'audit ; renvoie le nombre d'entrées supprimées. */
+  async adminPurgeAuditLogs(): Promise<number> {
+    const json = await request<{ data: { deleted: number } }>('/admin/audit-logs', {
+      method: 'DELETE'
+    });
+    return json.data.deleted;
   },
 
   async adminGetStats(): Promise<AdminStats> {
@@ -684,6 +610,15 @@ export const api = {
       { method: 'POST' }
     );
     return json.data;
+  },
+
+  /** Suppression définitive d'une invitation (tous statuts confondus). */
+  async adminDeleteInvitation(id: string): Promise<string> {
+    const json = await request<{ data: { id: string } }>(
+      `/admin/invitations/${encodeURIComponent(id)}`,
+      { method: 'DELETE' }
+    );
+    return json.data.id;
   },
 
   /** Endpoint public : l'invité active son compte avec le code reçu. */

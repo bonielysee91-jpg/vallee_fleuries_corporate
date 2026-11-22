@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppStore } from '../../store/useAppStore.ts';
 import { api, formatFcfa } from '../../services/api.ts';
@@ -13,7 +13,9 @@ import {
   Loader2,
   MapPin,
   Search,
-  Wrench
+  ShieldCheck,
+  Wrench,
+  XCircle
 } from 'lucide-react';
 
 type ModerationFilter = 'ALL' | 'PENDING_REVIEW' | 'PUBLISHED' | 'RESERVED';
@@ -45,6 +47,7 @@ const statusPillClass = (status: Property['status']): string => {
 /** `/admin/moderation` — listing approval queue and landlord-mandate verification. */
 export const AdminModerationPage: React.FC = () => {
   const addNotification = useAppStore((state) => state.addNotification);
+  const openConfirmation = useAppStore((state) => state.openConfirmation);
 
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
@@ -77,10 +80,10 @@ export const AdminModerationPage: React.FC = () => {
     };
   }, [addNotification]);
 
-  const handleUpdate = async (id: string, status: Property['status']) => {
+  const handleUpdate = async (id: string, status: Property['status'], reason?: string) => {
     setBusy({ id, status });
     try {
-      const updated = await api.adminUpdatePropertyStatus(id, status);
+      const updated = await api.adminUpdatePropertyStatus(id, status, reason);
       setProperties((prev) => prev.map((item) => (item.id === id ? updated : item)));
       addNotification(`Annonce mise à jour : ${STATUS_LABELS[status]}`, 'success');
     } catch (err: any) {
@@ -89,6 +92,31 @@ export const AdminModerationPage: React.FC = () => {
       setBusy(null);
     }
   };
+
+  /**
+   * Refus de publication : l'annonce quitte le catalogue et retourne en file
+   * d'attente de correction (`PENDING_REVIEW`). Le motif est transmis à l'audit.
+   */
+  const handleRefuse = (prop: Property) => {
+    openConfirmation({
+      title: 'Refuser la publication de l\'annonce',
+      message: `Refuser la mise en ligne de « ${prop.title} » ?\n\nLe mandat retournera en file d'attente et le propriétaire sera invité à corriger son annonce.`,
+      confirmLabel: 'Refuser la publication',
+      variant: 'warning',
+      inputPlaceholder: 'Motif du refus (ex: Documents ACD manquants, photos floues)',
+      onConfirm: async (reason) => {
+        await handleUpdate(prop.id, 'PENDING_REVIEW', reason?.trim() || undefined);
+      }
+    });
+  };
+
+  const counts = useMemo(() => {
+    const map: Record<string, number> = {};
+    properties.forEach((item) => {
+      map[item.status] = (map[item.status] ?? 0) + 1;
+    });
+    return map;
+  }, [properties]);
 
   const pendingCount = properties.filter((item) => item.status === 'PENDING_REVIEW').length;
   const term = search.trim().toLowerCase();
@@ -122,6 +150,23 @@ export const AdminModerationPage: React.FC = () => {
         </span>
       </header>
 
+      <div className="flex items-start gap-3 rounded-2xl bg-emerald-50 border border-emerald-100 p-4">
+        <ShieldCheck className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
+        <div className="text-[11px] text-emerald-950 leading-relaxed">
+          <p className="font-bold uppercase tracking-wide text-[10px] text-emerald-800">
+            Workflow de modération
+          </p>
+          <p className="mt-1">
+            <strong>1. En attente</strong> — le mandat propriétaire et l'état des lieux sont
+            contrôlés. <strong>2. Approuver &amp; publier</strong> — l'annonce rejoint le catalogue
+            public. <strong>3. Refuser</strong> — l'annonce quitte le catalogue et retourne en
+            attente de correction, avec le motif transmis au propriétaire.
+            <strong> 4. Réservation / Maintenance</strong> — suspension temporaire sans publication.
+            Chaque décision est horodatée dans le journal d'audit (<span className="font-mono">MODERATION_DECISION</span>).
+          </p>
+        </div>
+      </div>
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-2">
           {FILTERS.map((item) => (
@@ -136,6 +181,7 @@ export const AdminModerationPage: React.FC = () => {
               }`}
             >
               {item.label}
+              {item.id !== 'ALL' && counts[item.id] ? ` (${counts[item.id]})` : ''}
             </button>
           ))}
         </div>
@@ -267,6 +313,21 @@ export const AdminModerationPage: React.FC = () => {
                         )}
                         Mise en maintenance
                       </button>
+                      {prop.status !== 'PENDING_REVIEW' && (
+                        <button
+                          type="button"
+                          disabled={busy?.id === prop.id}
+                          onClick={() => handleRefuse(prop)}
+                          className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold disabled:opacity-50 transition-colors"
+                        >
+                          {busy?.id === prop.id && busy.status === 'PENDING_REVIEW' ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <XCircle className="w-3.5 h-3.5" />
+                          )}
+                          Refuser la publication
+                        </button>
+                      )}
                       <Link
                         to={`/properties/${prop.id}`}
                         className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 text-emerald-800 text-xs font-semibold transition-colors"

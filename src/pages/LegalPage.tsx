@@ -1,6 +1,42 @@
 import React, { useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, FileText, ShieldCheck, Scale, Info } from 'lucide-react';
+import { VFC_WEBSITE_URL, VFC_WEBSITE_DISPLAY } from '../constants/contact.ts';
+
+/**
+ * Rend un paragraphe en transformant l'adresse du site officiel en lien cliquable.
+ * Les textes juridiques restent de simples chaînes ; on met en valeur le seul
+ * canal réellement actionnable sans introduire de balisage lourd dans les données.
+ */
+const renderParagraph = (paragraph: string, key: number): React.ReactNode => {
+  const parts = paragraph.split(VFC_WEBSITE_DISPLAY);
+  if (parts.length === 1) {
+    return (
+      <p key={key} className="text-sm text-slate-600 leading-relaxed">
+        {paragraph}
+      </p>
+    );
+  }
+  return (
+    <p key={key} className="text-sm text-slate-600 leading-relaxed">
+      {parts.map((part, index) => (
+        <React.Fragment key={index}>
+          {part}
+          {index < parts.length - 1 && (
+            <a
+              href={VFC_WEBSITE_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="font-semibold text-emerald-800 underline decoration-emerald-300 underline-offset-2 hover:text-amber-600 hover:decoration-amber-400 transition-colors"
+            >
+              {VFC_WEBSITE_DISPLAY}
+            </a>
+          )}
+        </React.Fragment>
+      ))}
+    </p>
+  );
+};
 
 /**
  * `/legal/:section` — pages réglementaires du pied de page.
@@ -42,7 +78,7 @@ const DOCS: Record<string, LegalDoc> = {
       {
         heading: '2. Compte utilisateur',
         paragraphs: [
-          'La création d’un compte requiert une adresse e-mail valide et un numéro de téléphone ivoirien unique. Tout numéro nouvellement inscrit doit être vérifié par code SMS avant l’accès aux fonctionnalités.',
+          'La création d’un compte requiert une adresse e-mail valide et un numéro de téléphone ivoirien unique. L’accès aux fonctionnalités est immédiat après l’inscription.',
           'L’utilisateur s’engage à fournir des informations exactes et à maintenir la confidentialité de ses identifiants. Toute action réalisée depuis un compte est réputée effectuée par son titulaire.'
         ]
       },
@@ -94,14 +130,7 @@ const DOCS: Record<string, LegalDoc> = {
         heading: '3. Prestations de conciergerie et de mise en relation',
         paragraphs: [
           'La visite d’un bien, la constitution d’un dossier de candidature ou la mise en relation avec un professionnel (notaire, géomètre, syndic) peuvent donner lieu à des frais de service forfaitaires.',
-          'Ces frais sont communiqués à l’utilisateur avant paiement, directement dans l’interface, en application du principe de transparence tarifaire.'
-        ]
-      },
-      {
-        heading: '4. Paiement et moyens acceptés',
-        paragraphs: [
-          'Les règlements s’effectuent via les canaux Mobile Money (Wave, Orange Money, MTN MoMo, Moov Money) ou par carte bancaire. Aucune donnée bancaire complète n’est stockée par la plateforme.',
-          'Toute prestation payée est couverte par un reçu consultable depuis l’espace personnel de l’utilisateur.'
+          'Ces frais sont communiqués à l’utilisateur avant tout engagement, directement dans l’interface, en application du principe de transparence tarifaire.'
         ]
       }
     ]
@@ -118,14 +147,14 @@ const DOCS: Record<string, LegalDoc> = {
         heading: '1. Données collectées',
         paragraphs: [
           'Informations d’identification : nom complet, adresse e-mail, numéro de téléphone, rôle sur la plateforme.',
-          'Données d’usage : biens consultés, demandes de visite, échanges avec la conciergerie, historique des transactions et des reçus. Les échanges téléphoniques de vérification sont limités au strict nécessaire à la validation du compte.'
+          'Données d’usage : biens consultés, demandes de visite, échanges avec la conciergerie et historique des échanges. Les échanges téléphoniques de vérification sont limités au strict nécessaire à la validation du compte.'
         ]
       },
       {
         heading: '2. Finalités du traitement',
         paragraphs: [
-          'Gestion des comptes et de l’authentification (dont la vérification par code SMS du numéro de téléphone).',
-          'Mise en relation, traitement des demandes de visite, édition des baux et reçus, prévention de la fraude et respect des obligations légales.'
+          'Gestion des comptes et de l’authentification (identifiant et mot de passe).',
+          'Mise en relation, traitement des demandes de visite, édition des baux, prévention de la fraude et respect des obligations légales.'
         ]
       },
       {
@@ -138,15 +167,15 @@ const DOCS: Record<string, LegalDoc> = {
       {
         heading: '4. Partage des données',
         paragraphs: [
-          'Aucune donnée n’est cédée ni vendue à des tiers. Elles ne sont partagées qu’avec les prestataires strictement nécessaires (passerelles de paiement, opérateurs SMS pour la délivrance des codes de vérification) et pour la seule exécution de la prestation.',
-          'Les codes de vérification SMS ne sont jamais affichés à l’écran ni renvoyés au navigateur.'
+          'Aucune donnée n’est cédée ni vendue à des tiers. Elles ne sont partagées qu’avec les prestataires strictement nécessaires (opérateurs SMS pour la délivrance des codes de validation d’accès) et pour la seule exécution de la prestation.',
+          'Les codes de validation envoyés par SMS ne sont jamais affichés à l’écran ni renvoyés au navigateur.'
         ]
       },
       {
         heading: '5. Vos droits',
         paragraphs: [
           'Vous disposez d’un droit d’accès, de rectification, d’effacement et d’opposition sur vos données personnelles.',
-          'Pour exercer ces droits, contactez la direction à l’adresse contact@valleesfleuries.ci. Une réponse est apportée dans les meilleurs délais.'
+          'Pour exercer ces droits, contactez la direction à l’adresse WWW.valleesfleuries.com. Une réponse est apportée dans les meilleurs délais.'
         ]
       }
     ]
@@ -195,11 +224,7 @@ export const LegalPage: React.FC = () => {
         {doc.blocks.map((block) => (
           <section key={block.heading} className="space-y-2">
             <h2 className="font-serif text-lg font-bold text-emerald-950">{block.heading}</h2>
-            {block.paragraphs.map((paragraph, index) => (
-              <p key={index} className="text-sm text-slate-600 leading-relaxed">
-                {paragraph}
-              </p>
-            ))}
+            {block.paragraphs.map((paragraph, index) => renderParagraph(paragraph, index))}
           </section>
         ))}
       </article>

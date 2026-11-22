@@ -67,6 +67,17 @@ const FURNISHINGS: { id: FurnishingStatus; label: string }[] = [
   { id: 'FULLY_FURNISHED', label: 'Entièrement équipé' }
 ];
 
+/**
+ * Trois vues essentielles attendues pour chaque bien : la maison complète (extérieur),
+ * l'intérieur et une chambre. Le libellé est conservé dans `caption`, ce qui permet de
+ * retrouver l'emplacement aussi bien à la création qu'en modification.
+ */
+const GUIDED_PHOTO_SLOTS: { role: string; label: string; hint: string }[] = [
+  { role: 'Maison complète', label: 'La maison complète', hint: 'Vue extérieure du bien' },
+  { role: 'Intérieur', label: "L'intérieur", hint: 'Séjour / pièce de vie' },
+  { role: 'Chambre', label: 'Une chambre', hint: 'Chambre principale' }
+];
+
 /** `/dashboard/properties/new` (création) & `/dashboard/properties/:id/edit` (édition) — wizard multi-étapes. */
 export const PropertyWizardPage: React.FC = () => {
   const navigate = useNavigate();
@@ -263,6 +274,51 @@ export const PropertyWizardPage: React.FC = () => {
       ...prev,
       images: prev.images.map((image, position) => ({ ...image, isCover: position === index }))
     }));
+  };
+
+  /** Remplit (ou remplace) un emplacement guidé en conservant le rôle dans `caption`. */
+  const handleSlotFile = async (role: string, file: File | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      addNotification('Seuls les fichiers image sont acceptés', 'warning');
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      addNotification(`« ${file.name} » dépasse 8 Mo et a été ignorée`, 'warning');
+      return;
+    }
+    setProcessingImages(true);
+    try {
+      const url = await fileToResizedDataUrl(file);
+      setForm((prev) => {
+        const existingIndex = prev.images.findIndex((image) => image.caption === role);
+        const images =
+          existingIndex >= 0
+            ? prev.images.map((image, index) =>
+                index === existingIndex ? { ...image, url, caption: role } : image
+              )
+            : [...prev.images, { id: crypto.randomUUID(), url, caption: role, isCover: false }];
+        // Aucune couverture encore définie : la première photo disponible prend le rôle.
+        return images.some((image) => image.isCover)
+          ? { ...prev, images }
+          : { ...prev, images: images.map((image, index) => ({ ...image, isCover: index === 0 })) };
+      });
+    } catch (err: any) {
+      addNotification(err?.message || 'Ajout de la photo impossible', 'error');
+    } finally {
+      setProcessingImages(false);
+    }
+  };
+
+  /** Retire l'image d'un emplacement guidé (les autres photos sont conservées). */
+  const removeSlotImage = (role: string) => {
+    setForm((prev) => {
+      const images = prev.images.filter((image) => image.caption !== role);
+      if (images.length > 0 && !images.some((image) => image.isCover)) {
+        images[0] = { ...images[0], isCover: true };
+      }
+      return { ...prev, images };
+    });
   };
 
   const handleSubmit = async () => {
@@ -635,6 +691,59 @@ export const PropertyWizardPage: React.FC = () => {
 
         {step === 4 && (
           <div className="space-y-5">
+            <div>
+              <label className={labelClass}>Les 3 photos essentielles</label>
+              <div className="grid sm:grid-cols-3 gap-3">
+                {GUIDED_PHOTO_SLOTS.map((slot) => {
+                  const image = form.images.find((item) => item.caption === slot.role);
+                  return (
+                    <div
+                      key={slot.role}
+                      className="relative rounded-2xl overflow-hidden border border-slate-200 bg-white"
+                    >
+                      {image ? (
+                        <>
+                          <img
+                            src={image.url}
+                            alt={slot.label}
+                            className="w-full h-32 object-cover"
+                          />
+                          <div className="flex items-center justify-between gap-2 px-3 py-2">
+                            <span className="text-[10px] font-bold uppercase tracking-wide text-emerald-900">
+                              {slot.label}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => removeSlotImage(slot.role)}
+                              aria-label={`Supprimer ${slot.label}`}
+                              className="text-slate-400 hover:text-red-500 transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <label className="flex flex-col items-center justify-center gap-2 h-full min-h-[160px] px-3 py-6 text-center cursor-pointer border-2 border-dashed border-slate-300 rounded-2xl hover:border-emerald-400 hover:bg-emerald-50/50 transition-colors">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              void handleSlotFile(slot.role, e.target.files?.[0]);
+                              e.target.value = '';
+                            }}
+                          />
+                          <ImagePlus className="w-5 h-5 text-emerald-700" />
+                          <span className="text-xs font-bold text-slate-700">{slot.label}</span>
+                          <span className="text-[10px] text-slate-500">{slot.hint}</span>
+                        </label>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
             <div>
               <label className={labelClass}>Photos du bien</label>
               <label className="flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-300 px-4 py-8 text-center cursor-pointer hover:border-emerald-400 hover:bg-emerald-50/50 transition-colors">

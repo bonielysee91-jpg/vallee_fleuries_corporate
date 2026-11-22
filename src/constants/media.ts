@@ -22,3 +22,18 @@ export const VFC_MEDIA = {
 
 /** Last-resort visual when a listing has no cover image stored in the cloud. */
 export const FALLBACK_PROPERTY_IMAGE = VFC_MEDIA.modernVilla;
+
+/**
+ * Adapte la largeur demandée au CDN d'images (Unsplash) selon l'emplacement.
+ * Une vignette de 96 px n'a pas besoin du visuel 1600 px : sans cela, chaque
+ * miniature télécharge l'image pleine résolution, ce qui sature la bande passante
+ * (surtout sur réseau mobile) et retarde l'affichage.
+ * Les data-URL (base64 stockées en base) sont renvoyées telles quelles : leur
+ * redimensionnement nécessite un traitement serveur.
+ */
+export const optimizedImageUrl = (url: string | undefined, width: number): string | undefined => {
+  if (!url || !url.includes('images.unsplash.com')) return url;
+  return url
+    .replace(/([?&])w=\d+/, `$1w=${width}`)
+    .replace(/([?&])q=\d+/, '$1q=75');
+};

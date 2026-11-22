@@ -7,13 +7,14 @@ import { fileURLToPath } from 'url';
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { db } from './src/server/db.ts';
 import { neonClient } from './src/server/neon.ts';
-import { prisma } from './src/server/prisma.ts';
+import { prisma, describePrismaError, redactSecrets } from './src/server/prisma.ts';
 import {
   ACCESS_TOKEN_COOKIE,
   ACCESS_TOKEN_TTL_MS,
   REFRESH_TOKEN_COOKIE,
   REFRESH_TOKEN_TTL_MS,
   comparePassword,
+  hashPassword,
   parseCookies,
   sanitizeIvorianPhone,
   signJwtToken,
@@ -29,7 +30,6 @@ import {
 } from './src/server/authGuard.ts';
 import {
   acceptAdminInvitation,
-  consumeOtp,
   createAdminInvitation,
   createSession,
   createUser,
@@ -39,15 +39,12 @@ import {
   findUserById,
   findUserByIdentifier,
   isMailConfigured,
-  isSmsConfigured,
-  issueOtp,
   listAdminInvitations,
   markInvitationAccepted,
-  markPhoneVerified,
+  deleteAdminInvitation,
   revokeAdminInvitation,
   revokeSession,
   sendMail,
-  sendSms,
   toDomainUser,
   writeAuditLog,
 } from './src/server/authService.ts';
@@ -61,313 +58,14 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-// The raw body must survive JSON parsing: the Mobile Money webhook authenticity
-// is proven by an HMAC signature computed over the exact bytes the gateway sent.
 // Limite relevée : les annonces embarquent leur galerie photo en data URL (base64),
 // bien au-delà du plafond par défaut de 100 ko.
-app.use(
-  express.json({
-    limit: '25mb',
-    verify: (req, _res, buf) => {
-      (req as Request & { rawBody?: Buffer }).rawBody = buf;
-    },
-  })
-);
+app.use(express.json({ limit: '25mb' }));
 
 const isProduction = process.env.NODE_ENV === 'production';
 
-/** Shared secret configured on the Mobile Money gateway (CinetPay / Wave / Orange). */
-const MOBILE_MONEY_WEBHOOK_SECRET = process.env.MOBILE_MONEY_WEBHOOK_SECRET || '';
-
-/** Identifiants de la passerelle d'agrégation (CinetPay / FedaPay). */
-const CINETPAY_API_KEY = process.env.CINETPAY_API_KEY || '';
-const CINETPAY_SITE_ID = process.env.CINETPAY_SITE_ID || '';
-const CINETPAY_CHECK_URL =
-  process.env.CINETPAY_CHECK_URL || 'https://api-checkout.cinetpay.com/v2/payment/check';
-
-/** Passerelle Wave Business (checkout hébergé) — Côte d'Ivoire. */
-const WAVE_API_KEY = process.env.WAVE_API_KEY || '';
-const WAVE_CHECKOUT_URL =
-  process.env.WAVE_CHECKOUT_URL || 'https://api.wave.com/v1/checkout/sessions';
-/** Secret de signature du webhook Wave (`whsec_…`) : HMAC-SHA256 sur `<timestamp>.<corps brut>`. */
-const WAVE_WEBHOOK_SECRET = process.env.WAVE_WEBHOOK_SECRET || '';
-/** URL publique de l'application, pour les redirections de retour de la passerelle. */
+/** URL publique de l'application, pour les liens de retour (invitations, e-mails). */
 const APP_URL = process.env.APP_URL || '';
-
-/** Orange Money Web Payment (Côte d'Ivoire) — checkout hébergé. */
-const ORANGE_MONEY_CLIENT_ID = process.env.ORANGE_MONEY_CLIENT_ID || '';
-const ORANGE_MONEY_CLIENT_SECRET = process.env.ORANGE_MONEY_CLIENT_SECRET || '';
-/** Clé marchand Web Payment (distincte du consumer key/secret) générée sur Orange Developer. */
-const ORANGE_MONEY_MERCHANT_KEY = process.env.ORANGE_MONEY_MERCHANT_KEY || '';
-const ORANGE_MONEY_WEBPAY_URL =
-  process.env.ORANGE_MONEY_WEBPAY_URL || 'https://api.orange.com/orange-money-webpay/ci/v1/webpayment';
-/** Devise acceptée par Orange WebPay. En CI : « XOF » (certains comptes hérités exigent « OUV »). */
-const ORANGE_MONEY_CURRENCY = process.env.ORANGE_MONEY_CURRENCY || 'XOF';
-/**
- * Base de l'API de statut Orange : le `notif_token` reçu (jeton de paiement) est ajouté
- * en suffixe de chemin. L'URL exacte variant selon les comptes, elle reste configurable.
- */
-const ORANGE_MONEY_STATUS_URL =
-  process.env.ORANGE_MONEY_STATUS_URL || 'https://api.orange.com/orange-money-webpay/ci/v1/webpayment';
-const ORANGE_MONEY_TOKEN_URL = 'https://api.orange.com/oauth/v3/token';
-
-/**
- * Double vérification anti-falsification : la notification de l'opérateur n'est jamais
- * crue sur parole, on demande à la passerelle si l'argent est RÉELLEMENT encaissé.
- *
- * - `ACCEPTED`   : encaissement confirmé par la passerelle.
- * - `REJECTED`   : la passerelle infirme (solde insuffisant, code secret erroné, annulation).
- * - `UNVERIFIED` : aucune clé configurée → on retombe sur la signature HMAC du webhook.
- *
- * Deux passerelles sont interrogées selon ce que porte la notification :
- * - **Orange Money** : sa notification n'est pas signée ; le `notif_token` (jeton de paiement)
- *   est rejoué auprès de l'API de statut d'Orange pour obtenir le verdict officiel.
- * - **CinetPay** : vérification historique par identifiant de transaction.
- *
- * Une erreur réseau est propagée : mieux vaut ne rien écrire et laisser l'opérateur
- * réémettre sa notification que de figer une transaction sur un verdict incertain.
- */
-async function verifyWithGateway(context: {
-  reference: string;
-  payToken?: string;
-}): Promise<'ACCEPTED' | 'REJECTED' | 'UNVERIFIED'> {
-  // 1. Orange Money : le verdict fait foi via l'API de statut (notification non signée).
-  if (context.payToken && ORANGE_MONEY_CLIENT_ID && ORANGE_MONEY_CLIENT_SECRET) {
-    const token = await getOrangeMoneyAccessToken();
-    const response = await fetch(
-      `${ORANGE_MONEY_STATUS_URL}/${encodeURIComponent(context.payToken)}`,
-      { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } }
-    );
-
-    if (!response.ok) {
-      throw new Error(`Vérification Orange indisponible (HTTP ${response.status})`);
-    }
-
-    const json = (await response.json().catch(() => null)) as any;
-    const status = String(json?.status ?? '').toUpperCase();
-    if (status === 'SUCCESS') return 'ACCEPTED';
-    if (['FAILED', 'EXPIRED', 'CANCELLED', 'CANCELED', 'REJECTED'].includes(status)) {
-      return 'REJECTED';
-    }
-    // INITIATED / PENDING : paiement non abouti → on n'authentifie pas la notification.
-    return 'UNVERIFIED';
-  }
-
-  // 2. CinetPay : vérification par identifiant de transaction.
-  if (!CINETPAY_API_KEY || !CINETPAY_SITE_ID) return 'UNVERIFIED';
-
-  const response = await fetch(CINETPAY_CHECK_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      apikey: CINETPAY_API_KEY,
-      site_id: CINETPAY_SITE_ID,
-      transaction_id: context.reference,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Vérification passerelle indisponible (HTTP ${response.status})`);
-  }
-
-  const json = (await response.json().catch(() => null)) as any;
-  const gatewayStatus = String(json?.data?.status ?? '').toUpperCase();
-  return gatewayStatus === 'ACCEPTED' ? 'ACCEPTED' : 'REJECTED';
-}
-
-/**
- * Vérifie la signature du callback passerelle. Deux schémas sont acceptés :
- *
- * 1. **Générique** — HMAC-SHA256 du corps brut, porté par `x-signature`,
- *    `x-cinetpay-signature` ou `x-paystack-signature`.
- * 2. **Wave** — entête `x-wave-signature: t=<timestamp>,v1=<hex>` où `v1` est le
- *    HMAC-SHA256 du corps brut préfixé du timestamp (`<timestamp>.<corps brut>`).
- *
- * Sans aucun secret configuré, les callbacks non signés ne sont tolérés qu'hors
- * production (tests locaux) ; la production exige toujours une signature valide.
- */
-function verifyWebhookSignature(req: Request): boolean {
-  const rawBody = (req as Request & { rawBody?: Buffer }).rawBody;
-  const bodyBuffer = rawBody ?? Buffer.from(JSON.stringify(req.body ?? {}));
-
-  const matches = (provided: string, expected: string): boolean => {
-    const a = Buffer.from(provided.toLowerCase());
-    const b = Buffer.from(expected.toLowerCase());
-    return a.length === b.length && crypto.timingSafeEqual(a, b);
-  };
-
-  // 1. Signature générique (HMAC du corps brut).
-  const genericSignature = String(
-    req.headers['x-signature'] ??
-      req.headers['x-cinetpay-signature'] ??
-      req.headers['x-paystack-signature'] ??
-      ''
-  ).trim();
-  if (MOBILE_MONEY_WEBHOOK_SECRET && genericSignature) {
-    const expected = crypto
-      .createHmac('sha256', MOBILE_MONEY_WEBHOOK_SECRET)
-      .update(bodyBuffer)
-      .digest('hex');
-    if (matches(genericSignature, expected)) return true;
-  }
-
-  // 2. Signature Wave : `t=<timestamp>,v1=<hex>`.
-  const waveSignature = String(
-    req.headers['x-wave-signature'] ?? req.headers['wave-signature'] ?? ''
-  ).trim();
-  if (WAVE_WEBHOOK_SECRET && waveSignature) {
-    const parts: Record<string, string> = {};
-    for (const kv of waveSignature.split(',')) {
-      const idx = kv.indexOf('=');
-      if (idx > 0) parts[kv.slice(0, idx).trim()] = kv.slice(idx + 1).trim();
-    }
-    if (parts.t && parts.v1) {
-      const expected = crypto
-        .createHmac('sha256', WAVE_WEBHOOK_SECRET)
-        .update(`${parts.t}.${bodyBuffer.toString('utf8')}`)
-        .digest('hex');
-      if (matches(parts.v1, expected)) return true;
-    }
-  }
-
-  // Aucun secret configuré : notifications non signées tolérées hors production seulement.
-  return !MOBILE_MONEY_WEBHOOK_SECRET && !WAVE_WEBHOOK_SECRET ? !isProduction : false;
-}
-
-/**
- * Crée une session de paiement hébergée Wave et renvoie son URL de lancement.
- *
- * ⚠️ L'argent n'est PAS encaissé à cet appel : Wave se contente de préparer une page de
- * paiement. C'est le webhook signé qui, après confirmation réelle par l'opérateur, fera
- * passer la transaction `PENDING` à `SUCCESSFUL`. Sans clé configurée, on renvoie `null`
- * et le flux retombe sur le suivi « en attente » sans redirection.
- */
-async function createWaveCheckoutSession(params: {
-  amountFcfa: number;
-  reference: string;
-}): Promise<string | null> {
-  if (!WAVE_API_KEY) return null;
-
-  const base = APP_URL || `http://localhost:${PORT}`;
-  const response = await fetch(WAVE_CHECKOUT_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${WAVE_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      amount: String(params.amountFcfa),
-      currency: 'XOF',
-      // Identifie la transaction côté VFC : Wave la renverra dans le webhook.
-      client_reference: params.reference,
-      success_url: `${base}/?payment=success&reference=${encodeURIComponent(params.reference)}`,
-      error_url: `${base}/?payment=failed&reference=${encodeURIComponent(params.reference)}`,
-    }),
-  });
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '');
-    throw new Error(`Wave indisponible (HTTP ${response.status}) ${detail.slice(0, 300)}`.trim());
-  }
-
-  const json = (await response.json().catch(() => null)) as any;
-  return (json?.wave_launch_url as string) || null;
-}
-
-/** Jeton OAuth2 Orange Money mis en cache (valable une heure, comme l'API SMS). */
-let orangeMoneyToken: { value: string; expiresAt: number } | null = null;
-
-async function getOrangeMoneyAccessToken(forceRenew = false): Promise<string> {
-  if (!forceRenew && orangeMoneyToken && orangeMoneyToken.expiresAt > Date.now() + 30_000) {
-    return orangeMoneyToken.value;
-  }
-
-  const credentials = Buffer.from(
-    `${ORANGE_MONEY_CLIENT_ID}:${ORANGE_MONEY_CLIENT_SECRET}`
-  ).toString('base64');
-  const response = await fetch(ORANGE_MONEY_TOKEN_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${credentials}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Accept: 'application/json',
-    },
-    body: 'grant_type=client_credentials',
-  });
-
-  if (!response.ok) {
-    throw new Error(`Authentification Orange Money refusée (HTTP ${response.status})`);
-  }
-
-  const json = (await response.json().catch(() => null)) as any;
-  if (!json?.access_token) {
-    throw new Error('Jeton Orange Money absent de la réponse');
-  }
-
-  orangeMoneyToken = {
-    value: json.access_token as string,
-    expiresAt: Date.now() + Number(json.expires_in ?? 3600) * 1000,
-  };
-  return orangeMoneyToken.value;
-}
-
-/**
- * Crée un paiement Web Orange Money et renvoie l'URL de la page hébergée.
- *
- * ⚠️ Comme pour Wave, l'argent n'est pas encaissé ici : le client confirme sur la page
- * Orange, puis le webhook (`notif_url`) déclenche le passage de PENDING à SUCCESSFUL.
- * Sans identifiants configurés, on renvoie `null` et le flux reste « en attente ».
- */
-async function createOrangeMoneyWebPayment(params: {
-  amountFcfa: number;
-  reference: string;
-  /** MSISDN du payeur au format 225XXXXXXXX : certaines zones Orange l'exigent (sans « + »). */
-  subscriberNumber?: string;
-}): Promise<string | null> {
-  if (!ORANGE_MONEY_CLIENT_ID || !ORANGE_MONEY_CLIENT_SECRET || !ORANGE_MONEY_MERCHANT_KEY) {
-    return null;
-  }
-
-  const base = APP_URL || `http://localhost:${PORT}`;
-  const payload = {
-    merchant_key: ORANGE_MONEY_MERCHANT_KEY,
-    currency: ORANGE_MONEY_CURRENCY,
-    // `order_id` doit être unique : la référence VFC l'est (contrainte @unique).
-    order_id: params.reference,
-    amount: params.amountFcfa,
-    // Omis si le numéro est inconnu (JSON.stringify ignore les valeurs `undefined`).
-    subscriber_number: params.subscriberNumber,
-    return_url: `${base}/?payment=success&reference=${encodeURIComponent(params.reference)}`,
-    cancel_url: `${base}/?payment=failed&reference=${encodeURIComponent(params.reference)}`,
-    // Webhook : Orange y notifie le statut final ; il est authentifié par signature/HMAC.
-    notif_url: `${base}/api/payments/webhook`,
-    lang: 'fr',
-    reference: params.reference,
-  };
-
-  const dispatch = (token: string) =>
-    fetch(ORANGE_MONEY_WEBPAY_URL, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-  // Le jeton peut expirer : on le renouvelle une fois avant d'abandonner.
-  let response = await dispatch(await getOrangeMoneyAccessToken());
-  if (response.status === 401) {
-    response = await dispatch(await getOrangeMoneyAccessToken(true));
-  }
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '');
-    throw new Error(
-      `Orange Money indisponible (HTTP ${response.status}) ${detail.slice(0, 300)}`.trim()
-    );
-  }
-
-  const json = (await response.json().catch(() => null)) as any;
-  return (json?.payment_url as string) || null;
-}
 
 /** Client metadata persisted on the `Session` row for audit + device listing. */
 function sessionMeta(req: Request) {
@@ -405,6 +103,31 @@ function clearAuthCookies(res: Response) {
   const baseCookie = { httpOnly: true, secure: isProduction, sameSite: 'lax' as const, path: '/' };
   res.clearCookie(ACCESS_TOKEN_COOKIE, baseCookie);
   res.clearCookie(REFRESH_TOKEN_COOKIE, baseCookie);
+}
+
+/**
+ * Réponse d'erreur unifiée : une indisponibilité de Neon (réseau, WebSocket,
+ * démarrage d'instance) devient un 503 explicite — jamais un « identifiants
+ * invalides » ni un 500 opaque. Les erreurs métier conservent leur message.
+ */
+function handleRouteError(res: Response, context: string, error: unknown): Response {
+  const info = describePrismaError(error);
+
+  if (info.isConnectionError) {
+    console.error(
+      `[${context}] Base de données indisponible — ${info.name}` +
+        `${info.code ? ` (${info.code})` : ''}: ${redactSecrets(info.message)}`
+    );
+    return res.status(503).json({
+      success: false,
+      code: 'DATABASE_UNAVAILABLE',
+      error:
+        'La base de données est momentanément indisponible. Merci de réessayer dans quelques instants.',
+    });
+  }
+
+  console.error(`[${context}] ${info.name}: ${redactSecrets(info.message)}`);
+  return res.status(500).json({ success: false, error: info.message });
 }
 
 // -------------------------------------------------------------
@@ -489,28 +212,8 @@ app.get('/api/system/architecture', async (_req, res) => {
 });
 
 // -------------------------------------------------------------
-// 2. UNIFIED AUTHENTICATION ENGINE (EMAIL / PASSWORD OR +225 SMS OTP)
+// 2. UNIFIED AUTHENTICATION ENGINE (EMAIL / PASSWORD)
 // -------------------------------------------------------------
-
-/**
- * Émet un code SMS d'inscription et tente l'envoi réel dès qu'une passerelle est
- * configurée. Le code n'est JAMAIS renvoyé au navigateur : sans passerelle il n'est
- * journalisé qu'hors production (console serveur) pour rester testable en local.
- * Lève `SMS_NOT_CONFIGURED` en production si aucune passerelle n'est disponible.
- */
-async function deliverRegistrationCode(phoneNumber: string): Promise<void> {
-  const { code } = await issueOtp(phoneNumber, 'REGISTER');
-  if (isSmsConfigured()) {
-    await sendSms(
-      phoneNumber,
-      `Vallées Fleuries : votre code de validation d'inscription est ${code}. Valable 10 minutes.`
-    );
-  } else if (isProduction) {
-    throw new Error('SMS_NOT_CONFIGURED');
-  } else {
-    console.log(`[OTP REGISTER] Code pour ${phoneNumber} : ${code}`);
-  }
-}
 
 // A. Registration — always hashes the password before it touches Neon.
 app.post('/api/auth/register', async (req, res) => {
@@ -547,8 +250,6 @@ app.post('/api/auth/register', async (req, res) => {
     const safeRole: UserRole =
       requestedRole === 'OWNER' ? 'OWNER' : requestedRole === 'AGENT' ? 'AGENT' : 'TENANT';
 
-    // Le compte self-service démarre non vérifié : la connexion restera refusée
-    // tant que le code SMS d'activation n'aura pas été validé.
     const user = await createUser({
       email,
       phoneNumber: cleanPhone,
@@ -556,10 +257,7 @@ app.post('/api/auth/register', async (req, res) => {
       password,
       role: safeRole,
       companyName,
-      phoneVerified: false,
     });
-
-    await deliverRegistrationCode(cleanPhone);
 
     await writeAuditLog({
       userId: user.id,
@@ -567,124 +265,25 @@ app.post('/api/auth/register', async (req, res) => {
       entity: 'USER',
       entityId: user.id,
       ipAddress: sessionMeta(req).ipAddress,
-      details: { role: user.role, method: 'PASSWORD', codeDelivered: isSmsConfigured() },
+      details: { role: user.role, method: 'PASSWORD' },
     });
+
+    // Aucune vérification par SMS : le compte est actif immédiatement et la
+    // session s'ouvre dès la création.
+    const { accessToken } = await issueTokenPair(req, res, user);
 
     res.status(201).json({
       success: true,
-      message: `Compte créé. Un code de validation a été envoyé par SMS au ${cleanPhone}.`,
-      requiresVerification: true,
-      phoneNumber: cleanPhone,
-    });
-  } catch (error: any) {
-    console.error('[Register]', error);
-    if (error.message === 'SMS_NOT_CONFIGURED') {
-      return res.status(503).json({
-        success: false,
-        error:
-          'Passerelle SMS non configurée : le code de validation ne peut pas être envoyé pour le moment.',
-      });
-    }
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// B. Validation du code SMS d'inscription — active le compte et ouvre la session.
-app.post('/api/auth/register/verify', async (req, res) => {
-  try {
-    const { phoneNumber, code } = req.body;
-    if (!phoneNumber || !code) {
-      return res.status(400).json({ success: false, error: 'Numéro et code SMS requis' });
-    }
-
-    const cleanPhone = sanitizeIvorianPhone(phoneNumber);
-    const isValid = await consumeOtp(cleanPhone, code, 'REGISTER');
-    if (!isValid) {
-      await writeAuditLog({
-        action: 'OTP_FAILED',
-        entity: 'USER',
-        ipAddress: sessionMeta(req).ipAddress,
-        details: { phoneNumber: cleanPhone, purpose: 'REGISTER' },
-      });
-      return res.status(400).json({
-        success: false,
-        code: 'INVALID_CODE',
-        error: 'Code de validation incorrect ou expiré',
-      });
-    }
-
-    const user = await findUserByIdentifier(cleanPhone);
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        error: 'Aucun compte ne correspond à ce numéro. Veuillez vous inscrire.',
-      });
-    }
-
-    const verifiedUser = user.phoneVerified ? user : await markPhoneVerified(user.id);
-
-    const { accessToken } = await issueTokenPair(req, res, verifiedUser);
-    await writeAuditLog({
-      userId: verifiedUser.id,
-      action: 'REGISTER_VERIFIED',
-      entity: 'USER',
-      entityId: verifiedUser.id,
-      ipAddress: sessionMeta(req).ipAddress,
-      details: { method: 'SMS_OTP' },
-    });
-
-    res.json({
-      success: true,
-      message: 'Numéro vérifié — bienvenue sur Vallées Fleuries Corporate',
-      user: toDomainUser(verifiedUser),
+      message: 'Compte créé — bienvenue sur Vallées Fleuries Corporate',
+      user: toDomainUser(user),
       token: accessToken,
     });
-  } catch (error: any) {
-    console.error('[Register Verify]', error);
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error) {
+    return handleRouteError(res, 'Register', error);
   }
 });
 
-// C. Renvoi du code d'inscription (le précédent est invalidé par issueOtp).
-app.post('/api/auth/register/resend', async (req, res) => {
-  try {
-    const { phoneNumber } = req.body;
-    if (!phoneNumber) {
-      return res.status(400).json({ success: false, error: 'Numéro de téléphone requis (+225)' });
-    }
-
-    const cleanPhone = sanitizeIvorianPhone(phoneNumber);
-    const user = await findUserByIdentifier(cleanPhone);
-    if (!user) {
-      return res
-        .status(404)
-        .json({ success: false, error: 'Aucun compte ne correspond à ce numéro.' });
-    }
-    if (user.phoneVerified) {
-      return res.status(409).json({
-        success: false,
-        error: 'Ce numéro est déjà vérifié. Vous pouvez vous connecter.',
-      });
-    }
-
-    await deliverRegistrationCode(cleanPhone);
-    res.json({
-      success: true,
-      message: `Nouveau code de validation envoyé au ${cleanPhone}.`,
-    });
-  } catch (error: any) {
-    console.error('[Register Resend]', error);
-    if (error.message === 'SMS_NOT_CONFIGURED') {
-      return res.status(503).json({
-        success: false,
-        error: 'Passerelle SMS non configurée : aucun code ne peut être envoyé pour le moment.',
-      });
-    }
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// D. Password Login — verifies the PBKDF2 hash stored in Neon.
+// B. Password Login — verifies the PBKDF2 hash stored in Neon.
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { identifier, password } = req.body;
@@ -737,24 +336,6 @@ app.post('/api/auth/login', async (req, res) => {
       });
     }
 
-    if (!user.phoneVerified) {
-      await writeAuditLog({
-        userId: user.id,
-        action: 'LOGIN_BLOCKED',
-        entity: 'USER',
-        entityId: user.id,
-        ipAddress: sessionMeta(req).ipAddress,
-        details: { reason: 'PHONE_NOT_VERIFIED' },
-      });
-      return res.status(403).json({
-        success: false,
-        code: 'PHONE_NOT_VERIFIED',
-        phoneNumber: user.phoneNumber,
-        error:
-          'Numéro non vérifié. Saisissez le code reçu par SMS pour activer votre compte.',
-      });
-    }
-
     const { accessToken } = await issueTokenPair(req, res, user);
     await writeAuditLog({
       userId: user.id,
@@ -771,110 +352,12 @@ app.post('/api/auth/login', async (req, res) => {
       user: toDomainUser(user),
       token: accessToken,
     });
-  } catch (error: any) {
-    console.error('[Login]', error);
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error) {
+    return handleRouteError(res, 'Login', error);
   }
 });
 
-// E. Send SMS OTP to an Ivorian +225 number
-app.post('/api/auth/otp/send', async (req, res) => {
-  try {
-    const { phoneNumber, purpose = 'LOGIN' } = req.body;
-    if (!phoneNumber) {
-      return res.status(400).json({ success: false, error: 'Numéro de téléphone requis (+225)' });
-    }
-
-    const cleanPhone = sanitizeIvorianPhone(phoneNumber);
-    const { code, expiresAt } = await issueOtp(cleanPhone, purpose);
-
-    // Envoi réel du SMS dès que la passerelle est configurée (SMS_API_URL + SMS_API_KEY).
-    if (isSmsConfigured()) {
-      try {
-        await sendSms(cleanPhone, `Vallées Fleuries : votre code de sécurité est ${code}. Valable 10 minutes.`);
-      } catch (error: any) {
-        console.error('[OTP Send] Passerelle SMS :', error.message);
-        return res.status(502).json({ success: false, error: 'Envoi du SMS impossible, veuillez réessayer.' });
-      }
-    } else if (isProduction) {
-      // Annoncer un envoi qui n'a pas eu lieu serait mensonger.
-      return res.status(503).json({
-        success: false,
-        error: 'Passerelle SMS non configurée : aucun code ne peut être délivré pour le moment.',
-      });
-    } else {
-      // Sans passerelle, le code n'est jamais renvoyé au navigateur : il reste
-      // consultable dans la console serveur pour les tests en local.
-      console.log(`[OTP SEND] Code pour ${cleanPhone} : ${code}`);
-    }
-
-    res.json({
-      success: true,
-      message: `Code de sécurité envoyé par SMS au ${cleanPhone}`,
-      expiresAt,
-    });
-  } catch (error: any) {
-    console.error('[OTP Send]', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// F. Verify SMS OTP then sign in (creating the account on first use)
-app.post('/api/auth/otp/verify', async (req, res) => {
-  try {
-    const { phoneNumber, code, fullName, role = 'TENANT' } = req.body;
-    if (!phoneNumber || !code) {
-      return res.status(400).json({ success: false, error: 'Numéro et code SMS requis' });
-    }
-
-    const cleanPhone = sanitizeIvorianPhone(phoneNumber);
-    const isValid = await consumeOtp(cleanPhone, code);
-    if (!isValid) {
-      await writeAuditLog({
-        action: 'OTP_FAILED',
-        entity: 'USER',
-        ipAddress: sessionMeta(req).ipAddress,
-        details: { phoneNumber: cleanPhone },
-      });
-      return res.status(400).json({
-        success: false,
-        error: 'Code de validation incorrect ou expiré',
-      });
-    }
-
-    let user = await findUserByIdentifier(cleanPhone);
-    if (!user) {
-      const requestedRole = String(role) as UserRole;
-      user = await createUser({
-        phoneNumber: cleanPhone,
-        fullName: fullName || 'Résident Vallées Fleuries',
-        role: requestedRole === 'OWNER' ? 'OWNER' : 'TENANT',
-      });
-    }
-
-    const { accessToken } = await issueTokenPair(req, res, user);
-    await writeAuditLog({
-      userId: user.id,
-      action: 'LOGIN',
-      entity: 'USER',
-      entityId: user.id,
-      ipAddress: sessionMeta(req).ipAddress,
-      details: { method: 'SMS_OTP' },
-    });
-
-    res.json({
-      success: true,
-      message: 'Authentification SMS réussie',
-      user: toDomainUser(user),
-      token: accessToken,
-    });
-  } catch (error: any) {
-    console.error('[OTP Verify]', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// E. Rotate the refresh token (called by the client when a request returns 401)
+// C. Rotate the refresh token (called by the client when a request returns 401)
 app.post('/api/auth/refresh', async (req, res) => {
   try {
     const refreshToken = parseCookies(req.headers.cookie)[REFRESH_TOKEN_COOKIE];
@@ -906,21 +389,24 @@ app.post('/api/auth/refresh', async (req, res) => {
     const { accessToken } = await issueTokenPair(req, res, user);
 
     res.json({ success: true, user: toDomainUser(user), token: accessToken });
-  } catch (error: any) {
-    console.error('[Refresh]', error);
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error) {
+    return handleRouteError(res, 'Refresh', error);
   }
 });
 
 // F. Current User — 401 when there is no valid session (never fabricates one)
 app.get('/api/auth/me', authenticateJWT, async (req, res) => {
-  const { userId } = (req as AuthedRequest).user!;
-  const user = await findUserById(userId);
-  if (!user || user.isBanned) {
-    clearAuthCookies(res);
-    return res.status(401).json({ success: false, error: 'Compte introuvable ou suspendu' });
+  try {
+    const { userId } = (req as AuthedRequest).user!;
+    const user = await findUserById(userId);
+    if (!user || user.isBanned) {
+      clearAuthCookies(res);
+      return res.status(401).json({ success: false, error: 'Compte introuvable ou suspendu' });
+    }
+    res.json({ success: true, user: toDomainUser(user), isAuthenticated: true });
+  } catch (error) {
+    return handleRouteError(res, 'Current User', error);
   }
-  res.json({ success: true, user: toDomainUser(user), isAuthenticated: true });
 });
 
 // G. Logout — revokes the server-side session and clears both cookies
@@ -943,12 +429,97 @@ app.get('/api/users/me', authenticateJWT, async (req, res) => {
   res.json({ success: true, data: toDomainUser(user) });
 });
 
+/**
+ * Changement de mot de passe (compte connecté, tous rôles).
+ *
+ * Le mot de passe actuel est revérifié contre le hash PBKDF2 stocké en base (aucune
+ * comparaison en clair), la politique de longueur est appliquée, puis le nouveau
+ * secret est re-haché. La session courante reste valide : la déconnexion n'est pas
+ * imposée, conformément à l'architecture existante (jeton d'accès courant + cookie
+ * de rafraîchissement révocable conservés). Chaque tentative est journalisée.
+ */
+app.post('/api/auth/change-password', authenticateJWT, async (req, res) => {
+  try {
+    const { userId } = (req as AuthedRequest).user!;
+    const { currentPassword, newPassword, confirmNewPassword } = req.body ?? {};
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        error: 'Mot de passe actuel et nouveau mot de passe requis',
+      });
+    }
+    if (typeof newPassword !== 'string' || newPassword.length < 8) {
+      return res.status(400).json({
+        success: false,
+        error: 'Le nouveau mot de passe doit contenir au moins 8 caractères',
+      });
+    }
+    if (!/[a-zA-Z]/.test(newPassword) || !/\d/.test(newPassword)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Le nouveau mot de passe doit combiner des lettres et des chiffres',
+      });
+    }
+    if (confirmNewPassword !== undefined && newPassword !== confirmNewPassword) {
+      return res.status(400).json({
+        success: false,
+        error: 'La confirmation ne correspond pas au nouveau mot de passe',
+      });
+    }
+
+    const user = await findUserById(userId);
+    if (!user) return res.status(404).json({ success: false, error: 'Compte introuvable' });
+
+    // Vérification du mot de passe actuel : échoue sans divulguer de détail exploitable.
+    if (!user.passwordHash || !comparePassword(currentPassword, user.passwordHash)) {
+      await writeAuditLog({
+        userId,
+        action: 'PASSWORD_CHANGE_FAILED',
+        entity: 'USER',
+        entityId: userId,
+        ipAddress: sessionMeta(req).ipAddress,
+        details: { reason: user.passwordHash ? 'BAD_CURRENT_PASSWORD' : 'NO_PASSWORD_SET' },
+      });
+      return res.status(401).json({ success: false, error: 'Mot de passe actuel incorrect' });
+    }
+
+    if (comparePassword(newPassword, user.passwordHash)) {
+      return res.status(400).json({
+        success: false,
+        error: "Le nouveau mot de passe doit être différent de l'actuel",
+      });
+    }
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash: hashPassword(newPassword) },
+    });
+
+    await writeAuditLog({
+      userId,
+      action: 'PASSWORD_CHANGED',
+      entity: 'USER',
+      entityId: userId,
+      ipAddress: sessionMeta(req).ipAddress,
+      details: { method: 'PASSWORD' },
+    });
+
+    res.json({ success: true, message: 'Mot de passe mis à jour avec succès' });
+  } catch (error) {
+    return handleRouteError(res, 'Change Password', error);
+  }
+});
+
 // -------------------------------------------------------------
 // 4. RENTAL PROPERTIES API (RENTALS ONLY)
 // -------------------------------------------------------------
 app.get(['/api/rentals', '/api/properties'], optionalJWT, async (req, res) => {
   try {
-    const { category, commune, city, minPrice, maxPrice, type, furnishing, bedrooms, q } = req.query;
+    const {
+      category, commune, city, minPrice, maxPrice, type, furnishing, bedrooms,
+      q, searchQuery, hasGenerator, hasBackupGenerator, hasWaterReserve, hasSecurity247, available,
+    } = req.query;
     const properties = await db.getProperties({
       category: category as string,
       commune: commune as string,
@@ -958,7 +529,15 @@ app.get(['/api/rentals', '/api/properties'], optionalJWT, async (req, res) => {
       maxPrice: maxPrice ? Number(maxPrice) : undefined,
       furnishing: furnishing as string,
       bedrooms: bedrooms as string,
-      searchQuery: q as string,
+      // Le catalogue public envoie « searchQuery » ; certaines intégrations utilisent « q ».
+      searchQuery: (searchQuery ?? q) as string,
+      // Équipements (Spécificités Abidjan) : l'interface envoie « hasBackupGenerator »,
+      // la colonne Prisma s'appelle « hasGenerator ».
+      hasGenerator: (hasGenerator ?? hasBackupGenerator) as string,
+      hasWaterReserve: hasWaterReserve as string,
+      hasSecurity247: hasSecurity247 as string,
+      // Portée publique : « available=true » restreint aux annonces publiées/disponibles.
+      available: available as string,
     });
     res.json({ success: true, count: properties.length, data: properties });
   } catch (error: any) {
@@ -1296,6 +875,44 @@ app.get('/api/visits', authenticateJWT, requireRole(['OWNER', 'AGENT', 'ADMIN'])
   }
 });
 
+app.delete('/api/admin/visits/:id', authenticateJWT, requireRole(['ADMIN']), async (req, res) => {
+  try {
+    const actor = (req as AuthedRequest).user!;
+    const deleted = await db.deleteVisit(req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ success: false, error: 'Demande de visite introuvable.' });
+    }
+
+    await writeAuditLog({
+      userId: actor.userId,
+      action: 'VISIT_DELETED' as any,
+      entity: 'VISIT',
+      entityId: deleted.id,
+      ipAddress: sessionMeta(req).ipAddress,
+      details: {
+        clientName: deleted.clientName || deleted.userName,
+        propertyTitle: deleted.propertyTitle,
+        status: deleted.status,
+      },
+    });
+
+    broadcastToAdmins('visit:deleted', { id: deleted.id });
+    res.json({ success: true, data: { id: deleted.id } });
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// Espace client : un visiteur ne voit que ses propres demandes de visite (statut + message de l'administrateur).
+app.get('/api/visits/mine', authenticateJWT, async (req, res) => {
+  try {
+    const user = (req as AuthedRequest).user!;
+    res.json({ success: true, data: await db.getVisitsByTenant(user.userId) });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 app.post('/api/visits', authenticateJWT, async (req, res) => {
   try {
     const user = (req as AuthedRequest).user!;
@@ -1319,6 +936,64 @@ app.post('/api/visits', authenticateJWT, async (req, res) => {
     );
 
     res.status(201).json({ success: true, data: newVisit });
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.patch('/api/visits/:id/status', authenticateJWT, requireRole(['OWNER', 'AGENT', 'ADMIN']), async (req, res) => {
+  try {
+    const user = (req as AuthedRequest).user!;
+    const { id } = req.params;
+    const { status, notes, adminMessage } = req.body;
+
+    const validStatuses = ['PENDING', 'CONFIRMED', 'CANCELLED', 'COMPLETED'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ success: false, error: 'Statut de visite invalide.' });
+    }
+
+    const updated = await db.updateVisitStatus(id, status, notes, adminMessage);
+
+    await writeAuditLog({
+      userId: user.userId,
+      action: (status === 'CONFIRMED' ? 'VISIT_CONFIRMED' : `VISIT_STATUS_${status}`) as any,
+      entity: 'VISIT',
+      entityId: id,
+      ipAddress: sessionMeta(req).ipAddress,
+    });
+
+    broadcastToAdmins('visit:status_changed', { id, status, updated });
+
+    res.json({ success: true, data: updated });
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.patch('/api/visits/:id', authenticateJWT, requireRole(['OWNER', 'AGENT', 'ADMIN']), async (req, res) => {
+  try {
+    const user = (req as AuthedRequest).user!;
+    const { id } = req.params;
+    const { status, notes, adminMessage } = req.body;
+
+    const validStatuses = ['PENDING', 'CONFIRMED', 'CANCELLED', 'COMPLETED'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ success: false, error: 'Statut de visite invalide.' });
+    }
+
+    const updated = await db.updateVisitStatus(id, status, notes, adminMessage);
+
+    await writeAuditLog({
+      userId: user.userId,
+      action: (status === 'CONFIRMED' ? 'VISIT_CONFIRMED' : `VISIT_STATUS_${status}`) as any,
+      entity: 'VISIT',
+      entityId: id,
+      ipAddress: sessionMeta(req).ipAddress,
+    });
+
+    broadcastToAdmins('visit:status_changed', { id, status, updated });
+
+    res.json({ success: true, data: updated });
   } catch (error: any) {
     res.status(400).json({ success: false, error: error.message });
   }
@@ -1380,369 +1055,9 @@ app.get('/api/leases', authenticateJWT, async (req, res) => {
   }
 });
 
-// -------------------------------------------------------------
-// 9. MOBILE MONEY PAYMENTS & WEBHOOK ARCHITECTURE
-// -------------------------------------------------------------
-app.get('/api/transactions', authenticateJWT, requireRole(['OWNER', 'AGENT', 'ADMIN']), async (req, res) => {
-  try {
-    res.json({ success: true, data: await db.getTransactions() });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// Export CSV du grand livre Mobile Money, réservé aux administrateurs.
-app.get('/api/admin/payments/export', authenticateJWT, requireRole(['ADMIN']), async (req, res) => {
-  try {
-    const transactions = await db.getTransactions();
-
-    /** Échappe une valeur CSV et neutralise les formules qu'Excel exécuterait. */
-    const cell = (value: unknown): string => {
-      const raw = value === null || value === undefined ? '' : String(value);
-      const safe = /^[=+\-@]/.test(raw) ? `'${raw}` : raw;
-      return `"${safe.replace(/"/g, '""')}"`;
-    };
-
-    const header = [
-      'Référence',
-      'Date',
-      'Client',
-      'Téléphone',
-      'Moyen de paiement',
-      'Objet',
-      'Montant (FCFA)',
-      'Frais (FCFA)',
-      'Net (FCFA)',
-      'Statut',
-      'Référence opérateur',
-    ];
-
-    const rows = transactions.map((tx) => [
-      tx.reference,
-      new Date(tx.createdAt).toISOString(),
-      tx.clientName ?? tx.payerName,
-      tx.clientPhone ?? tx.payerPhone,
-      tx.paymentMethod,
-      tx.purpose,
-      tx.amountFcfa,
-      tx.feeFcfa,
-      tx.netAmountFcfa,
-      tx.status,
-      tx.paymentProvider ?? '',
-    ]);
-
-    // Séparateur « ; » (Excel francophone) et BOM UTF-8 pour que les accents s'affichent.
-    const csv =
-      '\uFEFF' + [header, ...rows].map((row) => row.map(cell).join(';')).join('\r\n');
-    const filename = `transactions-vfc-${new Date().toISOString().slice(0, 10)}.csv`;
-
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.send(csv);
-  } catch (error: any) {
-    console.error('[Export CSV]', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// Envoi du code de validation Mobile Money : il précède le débit dès qu'une passerelle
-// SMS existe. Sans passerelle, on n'annonce ni n'exige un code que personne ne recevrait :
-// le débit se fait directement (`codeRequired: false`), et l'étape se réactive d'elle-même
-// le jour où ORANGE_SMS_CLIENT_ID/ORANGE_SMS_CLIENT_SECRET (ou SMS_API_URL/KEY) sont fournis.
-app.post('/api/payments/confirm-code', authenticateJWT, async (req, res) => {
-  try {
-    const user = (req as AuthedRequest).user!;
-    const rawPhone = req.body?.phoneNumber || user.phoneNumber;
-    if (!rawPhone) {
-      return res.status(400).json({ success: false, error: 'Numéro de téléphone requis (+225)' });
-    }
-
-    const phone = sanitizeIvorianPhone(rawPhone);
-
-    if (!isSmsConfigured()) {
-      return res.json({
-        success: true,
-        codeRequired: false,
-        message: 'Aucune passerelle SMS configurée : la validation par code est désactivée.',
-      });
-    }
-
-    const { code, expiresAt } = await issueOtp(phone, 'PAYMENT');
-    try {
-      await sendSms(phone, `Vallées Fleuries : votre code de validation de paiement est ${code}. Valable 10 minutes.`);
-    } catch (error: any) {
-      console.error('[Payment OTP Send] Passerelle SMS :', error.message);
-      return res.status(502).json({ success: false, error: 'Envoi du SMS impossible, veuillez réessayer.' });
-    }
-
-    res.json({
-      success: true,
-      codeRequired: true,
-      message: `Code de validation envoyé par SMS au ${phone}`,
-      expiresAt,
-    });
-  } catch (error: any) {
-    console.error('[Payment OTP Send]', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-app.post('/api/payments/initiate', authenticateJWT, async (req, res) => {
-  try {
-    const user = (req as AuthedRequest).user!;
-    const {
-      phoneNumber,
-      provider,
-      amountFcfa,
-      purpose,
-      clientName,
-      propertyTitle,
-      propertyId,
-      bookingId,
-      leaseId,
-      confirmationCode,
-    } = req.body;
-
-    if (!amountFcfa || Number(amountFcfa) <= 0) {
-      return res.status(400).json({ success: false, error: 'Montant de paiement invalide' });
-    }
-
-    const payerPhone = sanitizeIvorianPhone(phoneNumber || user.phoneNumber || '');
-
-    // 🔒 Aucun débit sans code de validation — mais uniquement quand une passerelle SMS peut
-    // réellement le délivrer. Sans passerelle, exiger un code bloquerait tout paiement.
-    if (isSmsConfigured()) {
-      if (!confirmationCode) {
-        return res.status(400).json({
-          success: false,
-          error: 'Code de validation requis avant exécution du paiement',
-        });
-      }
-
-      const codeAccepted = await consumeOtp(payerPhone, String(confirmationCode), 'PAYMENT');
-      if (!codeAccepted) {
-        await writeAuditLog({
-          userId: user.userId,
-          action: 'PAYMENT_OTP_FAILED',
-          entity: 'TRANSACTION',
-          ipAddress: sessionMeta(req).ipAddress,
-          details: { phoneNumber: payerPhone, amountFcfa: Number(amountFcfa) },
-        });
-        return res.status(400).json({ success: false, error: 'Code de validation incorrect ou expiré' });
-      }
-    }
-
-    const tx = await db.processMobileMoneyPayment({
-      userId: user.userId,
-      phoneNumber: payerPhone,
-      provider: provider || 'WAVE',
-      amountFcfa: Number(amountFcfa),
-      purpose: purpose || 'MOVE_IN_PACKAGE',
-      clientName: clientName || user.fullName,
-      propertyTitle,
-      // Rattachement optionnel au contrat : c'est lui qui déclenche l'activation
-      // du bail / de la réservation au moment du webhook d'encaissement.
-      propertyId,
-      bookingId,
-      leaseId,
-    });
-
-    await writeAuditLog({
-      userId: user.userId,
-      action: 'PAYMENT_INITIATED',
-      entity: 'TRANSACTION',
-      entityId: tx.id,
-      ipAddress: sessionMeta(req).ipAddress,
-      details: { amountFcfa: tx.amountFcfa, provider: tx.paymentMethod, purpose: tx.purpose },
-    });
-
-    // Passerelle hébergée : on génère l'URL de paiement vers laquelle rediriger le client.
-    // La transaction reste PENDING tant que le webhook n'a pas confirmé l'encaissement.
-    const method = String(tx.paymentMethod).toUpperCase();
-    let paymentUrl: string | null = null;
-    try {
-      if (method === 'WAVE') {
-        paymentUrl = await createWaveCheckoutSession({
-          amountFcfa: tx.amountFcfa,
-          reference: tx.reference,
-        });
-      } else if (method === 'ORANGE_MONEY') {
-        paymentUrl = await createOrangeMoneyWebPayment({
-          amountFcfa: tx.amountFcfa,
-          reference: tx.reference,
-          // Orange attend le MSISDN sans « + » (225XXXXXXXX).
-          subscriberNumber: payerPhone.replace('+', ''),
-        });
-      }
-    } catch (error: any) {
-      console.error('[Payment Initiate] Passerelle hébergée :', error.message);
-      return res.status(502).json({
-        success: false,
-        error: "Initialisation du paiement auprès de l'opérateur impossible, veuillez réessayer.",
-      });
-    }
-
-    res.json({ success: true, data: { ...tx, paymentUrl } });
-  } catch (error: any) {
-    res.status(400).json({ success: false, error: error.message });
-  }
-});
-
-// Public by necessity: Mobile Money gateways cannot present a user JWT.
-// Authenticity is established by EITHER a valid HMAC signature (generic gateways)
-// OR the gateway's own verification of the transaction (CinetPay-style, where the
-// callback carries no signed body). Either way the callback is only reconciled
-// against the PENDING transaction created at initiation.
-app.post(['/api/payments/webhook', '/api/webhooks/mobile-money'], async (req, res) => {
-  const body = (req.body ?? {}) as Record<string, any>;
-  // Wave encapsule le détail dans `data` (ex. `data.client_reference`, `data.payment_status`).
-  const data = (body.data ?? {}) as Record<string, any>;
-
-  const reference = String(
-    body.reference ??
-      body.transaction_reference ??
-      body.transaction_id ??
-      body.cpm_trans_id ??
-      body.tx_reference ??
-      // Wave : référence posée à la création de la session de checkout.
-      body.client_reference ??
-      data.client_reference ??
-      // Orange Money : référence commande transmise au webhook (notif_url).
-      body.order_id ??
-      ''
-  ).trim();
-
-  if (!reference) {
-    return res.status(400).json({ success: false, error: 'Référence de transaction manquante' });
-  }
-
-  // Signature portée par l'entête : suffisante pour authentifier la notification.
-  const signatureOk = verifyWebhookSignature(req);
-
-  // Référence propre à l'opérateur : elle n'est conservée que pour l'encaissement réel.
-  const operatorReference = String(
-    body.operator_reference ??
-      body.operatorReference ??
-      body.gateway_reference ??
-      body.cpm_payid ??
-      // Orange Money : identifiant de transaction opérateur.
-      body.txnid ??
-      // Wave : identifiant de la session de checkout.
-      data.id ??
-      ''
-  ).trim();
-  const gatewayStatus = String(
-    body.status ??
-      body.status_code ??
-      body.payment_status ??
-      data.payment_status ??
-      data.status ??
-      ''
-  ).toUpperCase();
-
-  // Gateways disagree on field names; `accepted` is honoured when present,
-  // otherwise a set of well-known success codes decides the outcome.
-  let accepted =
-    typeof body.accepted === 'boolean'
-      ? body.accepted
-      : ['SUCCESS', 'SUCCESSFUL', 'SUCCEEDED', 'ACCEPTED', 'PAID', 'COMPLETED', '00'].includes(
-          gatewayStatus
-        );
-
-  // Orange Money ne signe pas sa notification : le `notif_token` sert de jeton de paiement
-  // à rejouer auprès de l'API de statut pour authentifier l'encaissement.
-  const orangePayToken = String(body.notif_token ?? body.notifToken ?? '').trim();
-
-  // 🔒 Anti-falsification : le corps de la notification ne suffit jamais. Quand les clés de la
-  // passerelle sont configurées, c'est SON verdict qui fait foi (il écrase celui du payload).
-  let gatewayVerdict: 'ACCEPTED' | 'REJECTED' | 'UNVERIFIED' = 'UNVERIFIED';
-  try {
-    gatewayVerdict = await verifyWithGateway({
-      reference,
-      payToken: orangePayToken || undefined,
-    });
-    if (gatewayVerdict === 'ACCEPTED') accepted = true;
-    else if (gatewayVerdict === 'REJECTED') accepted = false;
-  } catch (error: any) {
-    console.error('[Webhook Mobile Money] Vérification passerelle échouée :', error.message);
-    // Sans signature valide, une passerelle injoignable laisse la notification non authentifiée.
-    if (!signatureOk) {
-      return res.status(500).json({
-        success: false,
-        error: 'Vérification auprès de la passerelle indisponible — notification à réémettre',
-      });
-    }
-  }
-
-  // Aucune des deux preuves d'authenticité n'est disponible : on refuse la notification.
-  if (!signatureOk && gatewayVerdict === 'UNVERIFIED') {
-    return res.status(401).json({
-      success: false,
-      error: 'Notification non authentifiée (signature absente et passerelle non configurée)',
-    });
-  }
-
-  try {
-    const settled = await db.settleTransactionByReference({
-      reference,
-      accepted,
-      gatewayReference: operatorReference || undefined,
-      gatewayPayload: body,
-    });
-
-    if (!settled) {
-      return res.status(404).json({ success: false, error: `Transaction ${reference} introuvable` });
-    }
-
-    console.log(`[Webhook Mobile Money] ${reference} → ${settled.status}`);
-    res.status(200).json({
-      received: true,
-      status: 'ACKNOWLEDGED',
-      reference,
-      transactionStatus: settled.status,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
 
 // -------------------------------------------------------------
-// 10. CERTIFIED QUITTANCES DE LOYER (LANDLORD / AGENCY ONLY)
-// -------------------------------------------------------------
-app.get('/api/quittances', authenticateJWT, requireRole(['OWNER', 'AGENT', 'ADMIN']), async (req, res) => {
-  try {
-    res.json({ success: true, data: await db.getQuittances() });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-app.post(
-  '/api/quittances/generate',
-  authenticateJWT,
-  requireRole(['OWNER', 'AGENT', 'ADMIN']),
-  async (req, res) => {
-    try {
-      const user = (req as AuthedRequest).user!;
-      const quittance = await db.generateQuittance(req.body);
-      await writeAuditLog({
-        userId: user.userId,
-        action: 'QUITTANCE_GENERATED',
-        entity: 'QUITTANCE',
-        entityId: quittance.id,
-        ipAddress: sessionMeta(req).ipAddress,
-        details: { quittanceNumber: quittance.quittanceNumber },
-      });
-      res.status(201).json({ success: true, data: quittance });
-    } catch (error: any) {
-      res.status(400).json({ success: false, error: error.message });
-    }
-  }
-);
-
-// -------------------------------------------------------------
-// 11. TENANT SPACE (FAVORITES & MY RENTALS) — persisted in Neon
+// 9. TENANT SPACE (FAVORITES & MY RENTALS) — persisted in Neon
 // -------------------------------------------------------------
 app.get('/api/favorites', authenticateJWT, async (req, res) => {
   try {
@@ -1802,7 +1117,7 @@ app.get('/api/my-rentals', authenticateJWT, async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// 12. SUPER-ADMIN COMMAND CENTER (Role.ADMIN ONLY)
+// 10. SUPER-ADMIN COMMAND CENTER (Role.ADMIN ONLY)
 // -------------------------------------------------------------
 app.get('/api/admin/users', authenticateJWT, requireRole(['ADMIN']), async (req, res) => {
   try {
@@ -2083,6 +1398,30 @@ app.post('/api/admin/invitations/:id/revoke', authenticateJWT, requireRole(['ADM
   }
 });
 
+/** Suppression définitive d'une invitation (tous statuts confondus). */
+app.delete('/api/admin/invitations/:id', authenticateJWT, requireRole(['ADMIN']), async (req, res) => {
+  try {
+    const actor = (req as AuthedRequest).user!;
+    const deleted = await deleteAdminInvitation(req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ success: false, error: 'Invitation introuvable' });
+    }
+
+    await writeAuditLog({
+      userId: actor.userId,
+      action: 'INVITATION_DELETED',
+      entity: 'ADMIN_INVITATION',
+      entityId: deleted.id,
+      ipAddress: sessionMeta(req).ipAddress,
+      details: { email: deleted.email, status: deleted.status },
+    });
+
+    res.json({ success: true, data: { id: deleted.id } });
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
 /** Acceptation : endpoint public — l'invité active son compte avec le code reçu. */
 app.post('/api/invitations/accept', async (req, res) => {
   try {
@@ -2124,20 +1463,20 @@ app.post('/api/invitations/accept', async (req, res) => {
       user: toDomainUser(result.user),
       token: accessToken,
     });
-  } catch (error: any) {
-    console.error('[Invitation] Acceptation :', error);
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error) {
+    return handleRouteError(res, 'Invitation acceptation', error);
   }
 });
 
-/** Listing approval queue — rentals awaiting agency / Super-Admin validation. */
+/**
+ * File de modération — registre complet des annonces (tous statuts confondus).
+ * Les onglets « En attente / Publiés / Réservés » de la console filtrent côté client :
+ * l'API doit donc renvoyer l'intégralité du parc, et non les seules annonces en attente.
+ */
 app.get('/api/admin/moderation', authenticateJWT, requireRole(['ADMIN']), async (req, res) => {
   try {
     const listings = await db.getProperties();
-    const queue = listings.filter(
-      (p) => p.status === 'PENDING_REVIEW' || p.status === 'AVAILABLE'
-    );
-    res.json({ success: true, data: queue, count: queue.length });
+    res.json({ success: true, data: listings, count: listings.length });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -2155,7 +1494,7 @@ app.patch('/api/admin/properties/:id/status', authenticateJWT, requireRole(['ADM
       entity: 'PROPERTY',
       entityId: updated.id,
       ipAddress: sessionMeta(req).ipAddress,
-      details: { status: req.body.status },
+      details: { status: req.body.status, reason: req.body.reason ?? null },
     });
     res.json({ success: true, data: updated });
   } catch (error: any) {
@@ -2164,8 +1503,8 @@ app.patch('/api/admin/properties/:id/status', authenticateJWT, requireRole(['ADM
 });
 
 /**
- * Registre complet des biens pour le Command Center : contrairement à la file de
- * modération, cette vue renvoie **toutes** les annonces, quel que soit leur statut.
+ * Registre complet des biens pour le Command Center : renvoie **toutes** les annonces,
+ * quel que soit leur statut (gestion, réinitialisation et suppression depuis la console).
  */
 app.get('/api/admin/properties', authenticateJWT, requireRole(['ADMIN']), async (_req, res) => {
   try {
@@ -2205,23 +1544,6 @@ app.post(
     }
   }
 );
-
-/** Mobile Money ledger with the VFC commission split already applied. */
-app.get('/api/admin/transactions', authenticateJWT, requireRole(['ADMIN']), async (req, res) => {
-  try {
-    const transactions = (await db.getTransactions()).map((t) => {
-      const commissionFcfa = Math.round(t.amountFcfa * 0.05);
-      return {
-        ...t,
-        commissionFcfa,
-        ownerPayoutFcfa: t.netAmountFcfa - commissionFcfa,
-      };
-    });
-    res.json({ success: true, data: transactions });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
 
 /** Alertes persistantes du Command Center (cloche admin), les plus récentes d'abord. */
 app.get('/api/admin/notifications', authenticateJWT, requireRole(['ADMIN']), async (_req, res) => {
@@ -2289,17 +1611,66 @@ app.get('/api/admin/audit-logs', authenticateJWT, requireRole(['ADMIN']), async 
   }
 });
 
+/**
+ * Suppression d'une entrée du journal d'audit. L'effacement est lui-même journalisé
+ * (action `AUDIT_LOG_DELETED`) afin de conserver une trace de l'opération de purge.
+ */
+app.delete(
+  '/api/admin/audit-logs/:id',
+  authenticateJWT,
+  requireRole(['ADMIN']),
+  async (req, res) => {
+    try {
+      const existing = await prisma.auditLog.findUnique({ where: { id: req.params.id } });
+      if (!existing) {
+        return res.status(404).json({ success: false, error: 'Entrée d\'audit introuvable.' });
+      }
+
+      await prisma.auditLog.delete({ where: { id: existing.id } });
+
+      await writeAuditLog({
+        userId: (req as AuthedRequest).user!.userId,
+        action: 'AUDIT_LOG_DELETED',
+        entity: 'AUDIT_LOG',
+        entityId: existing.id,
+        ipAddress: sessionMeta(req).ipAddress,
+        details: { deletedAction: existing.action, deletedEntity: existing.entity },
+      });
+
+      res.json({ success: true, data: { id: existing.id } });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: error.message });
+    }
+  }
+);
+
+/** Purge complète du journal d'audit (opération de maintenance, elle-même journalisée). */
+app.delete('/api/admin/audit-logs', authenticateJWT, requireRole(['ADMIN']), async (req, res) => {
+  try {
+    const { count } = await prisma.auditLog.deleteMany({});
+
+    await writeAuditLog({
+      userId: (req as AuthedRequest).user!.userId,
+      action: 'AUDIT_LOG_PURGED',
+      entity: 'AUDIT_LOG',
+      ipAddress: sessionMeta(req).ipAddress,
+      details: { deletedCount: count },
+    });
+
+    res.json({ success: true, data: { deleted: count } });
+  } catch (error: any) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
 app.get('/api/admin/stats', authenticateJWT, requireRole(['ADMIN']), async (req, res) => {
   try {
-    const [users, properties, bookings, activeSessions, transactions] = await Promise.all([
+    const [users, properties, bookings, activeSessions] = await Promise.all([
       prisma.user.count(),
       prisma.property.count(),
       prisma.booking.count(),
       prisma.session.count({ where: { expiresAt: { gt: new Date() } } }),
-      db.getTransactions(),
     ]);
-
-    const volumeFcfa = transactions.reduce((sum, t) => sum + t.amountFcfa, 0);
 
     res.json({
       success: true,
@@ -2308,8 +1679,6 @@ app.get('/api/admin/stats', authenticateJWT, requireRole(['ADMIN']), async (req,
         properties,
         bookings,
         activeSessions,
-        transactionVolumeFcfa: volumeFcfa,
-        commissionRevenueFcfa: Math.round(volumeFcfa * 0.05),
       },
     });
   } catch (error: any) {
@@ -2318,7 +1687,57 @@ app.get('/api/admin/stats', authenticateJWT, requireRole(['ADMIN']), async (req,
 });
 
 // -------------------------------------------------------------
-// 13. VITE MIDDLEWARE & STATIC ASSET SERVER
+// 11. VISUELS DES BIENS (binaire + cache navigateur)
+// -------------------------------------------------------------
+/**
+ * Sert un visuel de bien en binaire à partir de la data-URL stockée en base.
+ * Le JSON de l'API ne transporte donc plus les images : il ne contient qu'une URL
+ * courte, que le navigateur met en cache (l'image n'est plus retéléchargée à chaque
+ * chargement de page, et un clic sur une miniature est servi instantanément).
+ */
+app.get('/api/images/:id', async (req: Request, res: Response) => {
+  try {
+    const stored = await db.getPropertyImageById(req.params.id);
+    if (!stored) {
+      res.status(404).json({ error: 'Visuel introuvable' });
+      return;
+    }
+
+    // Les visuels d'exemple hébergés sur un CDN distant sont simplement redirigés.
+    if (!stored.startsWith('data:')) {
+      res.redirect(302, stored);
+      return;
+    }
+
+    const commaIndex = stored.indexOf(',');
+    if (commaIndex < 0) {
+      res.status(415).json({ error: 'Format de visuel non pris en charge' });
+      return;
+    }
+
+    const meta = stored.slice(5, commaIndex); // après « data: »
+    const isBase64 = meta.endsWith(';base64');
+    const mimeType = (isBase64 ? meta.slice(0, -';base64'.length) : meta) || 'image/jpeg';
+    const buffer = Buffer.from(stored.slice(commaIndex + 1), isBase64 ? 'base64' : 'binary');
+    const etag = `"${crypto.createHash('sha1').update(buffer).digest('hex')}"`;
+
+    res.set('Content-Type', mimeType);
+    res.set('Cache-Control', 'public, max-age=31536000, immutable');
+    res.set('ETag', etag);
+
+    if (req.headers['if-none-match'] === etag) {
+      res.status(304).end();
+      return;
+    }
+
+    res.send(buffer);
+  } catch (error: any) {
+    res.status(500).json({ error: error?.message ?? 'Lecture du visuel impossible' });
+  }
+});
+
+// -------------------------------------------------------------
+// 12. VITE MIDDLEWARE & STATIC ASSET SERVER
 // -------------------------------------------------------------
 async function startServer() {
   if (!isProduction) {
@@ -2329,7 +1748,20 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.join(__dirname, 'dist')));
+    // Les fichiers buildés par Vite sont horodatés (hash dans le nom) : on autorise un cache
+    // navigateur d'un an (immutable) pour éviter tout re-téléchargement, tout en forçant la
+    // revalidation du seul index.html afin que chaque nouveau déploiement soit pris en compte.
+    app.use(
+      express.static(path.join(__dirname, 'dist'), {
+        maxAge: '1y',
+        immutable: true,
+        setHeaders: (res, filePath) => {
+          if (filePath.endsWith('index.html')) {
+            res.setHeader('Cache-Control', 'no-cache');
+          }
+        },
+      })
+    );
     app.get('*', (req, res) => {
       res.sendFile(path.join(__dirname, 'dist', 'index.html'));
     });
@@ -2338,8 +1770,18 @@ async function startServer() {
   // Provisionne le compte Super-Admin de la Direction à partir de `.env`.
   // Idempotent : sans configuration, l'opération est simplement ignorée, et un
   // échec de base ne doit jamais empêcher le serveur de démarrer.
-  await ensureBootstrapAdmin().catch((error: any) => {
-    console.error('[Bootstrap Admin] Échec du provisionnement :', error?.message ?? error);
+  await ensureBootstrapAdmin().catch((error) => {
+    const info = describePrismaError(error);
+    console.error(
+      `[Bootstrap Admin] Échec du provisionnement — ${info.name}` +
+        `${info.code ? ` (${info.code})` : ''}: ${redactSecrets(info.message)}`
+    );
+    if (info.isConnectionError) {
+      console.error(
+        '[Bootstrap Admin] Cause : base Neon injoignable. Le serveur démarre malgré tout ; ' +
+          "le provisionnement (idempotent) reprendra au prochain démarrage."
+      );
+    }
   });
 
   // Canal temps réel (cloche du Command Center) greffé sur le même serveur HTTP.

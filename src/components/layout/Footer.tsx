@@ -1,11 +1,12 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { useAppStore } from '../../store/useAppStore.ts';
-import { Building2, ShieldCheck, Phone, Mail, MapPin, ExternalLink, Check } from 'lucide-react';
-import { VFC_WHATSAPP_URL, VFC_WHATSAPP_DISPLAY } from '../../constants/contact.ts';
+import { useShallow } from 'zustand/react/shallow';
+import { ShieldCheck, Phone, Globe, MapPin, ExternalLink, Check } from 'lucide-react';
+import { VFC_WHATSAPP_URL, VFC_WHATSAPP_DISPLAY, VFC_WEBSITE_URL, VFC_WEBSITE_DISPLAY } from '../../constants/contact.ts';
 
 export const Footer: React.FC = () => {
-  const { setView } = useAppStore();
+  const { setView } = useAppStore(useShallow((s) => ({ setView: s.setView })));
 
   return (
     <footer className="bg-[#022C22] text-slate-300 pt-16 pb-12 border-t border-emerald-900/40">
@@ -14,13 +15,12 @@ export const Footer: React.FC = () => {
           
           {/* Brand & Purpose */}
           <div className="space-y-4 md:col-span-1">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-emerald-800 flex items-center justify-center text-amber-400">
-                <Building2 className="w-5 h-5" />
-              </div>
-              <span className="text-xl font-bold tracking-tight text-white font-serif">
-                Vallées Fleuries
-              </span>
+            <div className="inline-flex items-center rounded-xl bg-white p-1 shadow-md">
+              <img
+                src="/atar.jpg"
+                alt="Vallées Fleuries Corporate"
+                className="h-10 w-auto object-contain"
+              />
             </div>
             <p className="text-xs text-slate-400 leading-relaxed">
               Plateforme SaaS de vente et de location immobilière de référence en Côte d'Ivoire. Courtage institutionnel, sécurisation juridique des actes et des baux, et conciergerie de prestige.
@@ -70,7 +70,11 @@ export const Footer: React.FC = () => {
                   Calculateur Frais d'Entrée (Location)
                 </button>
               </li>
-              <li>Paiements Wave, Orange Money & MTN MoMo</li>
+              <li className="pt-1">
+                <Link to="/services" className="hover:text-amber-400 transition-colors">
+                  Nos Services & Prestations
+                </Link>
+              </li>
             </ul>
           </div>
 
@@ -89,8 +93,15 @@ export const Footer: React.FC = () => {
                 <span>{VFC_WHATSAPP_DISPLAY}</span>
               </div>
               <div className="flex items-center gap-2.5">
-                <Mail className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>contact@valleesfleuries.ci</span>
+                <Globe className="w-4 h-4 text-emerald-400 shrink-0" />
+                <a
+                  href={VFC_WEBSITE_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="hover:text-emerald-300 transition-colors"
+                >
+                  {VFC_WEBSITE_DISPLAY}
+                </a>
               </div>
               <div className="pt-2">
                 <a
@@ -109,7 +120,7 @@ export const Footer: React.FC = () => {
 
         {/* Quiet Sub-footer */}
         <div className="pt-8 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 gap-4">
-          <p>© 2026 Vallées Fleuries Corporate S.A.S. Tous droits réservés. R.C.M. CI-ABJ-2024-B-14209.</p>
+          <p>© 2026 Vallées Fleuries Corporate — le langage de la valeur ajoutée.</p>
           <div className="flex items-center gap-6">
             <Link to="/legal/conditions" className="hover:text-slate-300 transition-colors">
               Conditions Générales

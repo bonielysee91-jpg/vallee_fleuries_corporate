@@ -44,6 +44,7 @@ const statusMeta = (status: PropertyStatus) =>
 /** `/dashboard/properties/manage` — table CRUD des biens du propriétaire. */
 export const PropertyManagePage: React.FC = () => {
   const addNotification = useAppStore((state) => state.addNotification);
+  const openConfirmation = useAppStore((state) => state.openConfirmation);
   const currentUser = useAppStore((state) => state.currentUser);
 
   const [properties, setProperties] = useState<Property[]>([]);
@@ -122,24 +123,28 @@ export const PropertyManagePage: React.FC = () => {
   const canManage = (property: Property) =>
     isAdmin || (!!currentUser && property.ownerId === currentUser.id);
 
-  const handleDelete = async (property: Property) => {
-    const confirmed = window.confirm(
-      `Supprimer définitivement « ${property.title} » ? Cette action est irréversible.`
-    );
-    if (!confirmed) return;
-    setDeletingId(property.id);
-    try {
-      await api.deleteProperty(property.id);
-      setProperties((prev) => prev.filter((item) => item.id !== property.id));
-      addNotification(`Annonce « ${property.title} » supprimée`, 'success');
-    } catch (err) {
-      addNotification(
-        err instanceof Error ? err.message : 'Suppression impossible',
-        'error'
-      );
-    } finally {
-      setDeletingId(null);
-    }
+  const handleDelete = (property: Property) => {
+    openConfirmation({
+      title: 'Supprimer définitivement l\'annonce',
+      message: `Supprimer définitivement « ${property.title} » ?\n\nCette action retirera le bien du marché et supprimera les galeries associées. Cette opération est irréversible.`,
+      confirmLabel: 'Supprimer l\'annonce',
+      variant: 'danger',
+      onConfirm: async () => {
+        setDeletingId(property.id);
+        try {
+          await api.deleteProperty(property.id);
+          setProperties((prev) => prev.filter((item) => item.id !== property.id));
+          addNotification(`Annonce « ${property.title} » supprimée`, 'success');
+        } catch (err) {
+          addNotification(
+            err instanceof Error ? err.message : 'Suppression impossible',
+            'error'
+          );
+        } finally {
+          setDeletingId(null);
+        }
+      }
+    });
   };
 
   const priceSuffix = (category: Property['category']) =>

@@ -83,32 +83,6 @@ enum VisitType {
   VIRTUAL_3D   // Visite immersive 3D / Visio guidée
 }
 
-enum PaymentMethod {
-  WAVE            // Wave Côte d'Ivoire
-  ORANGE_MONEY    // Orange Money CI
-  MTN_MOMO        // MTN Mobile Money CI
-  MOOV_MONEY      // Moov Money CI
-  CARD_CINETPAY   // Carte Bancaire Visa/Mastercard via CinetPay
-  CARD_PAYSTACK   // Carte Bancaire Visa/Mastercard via Paystack
-  BANK_TRANSFER   // Virement bancaire corporate
-}
-
-enum TransactionStatus {
-  PENDING
-  PROCESSING
-  SUCCESSFUL
-  FAILED
-  REFUNDED
-}
-
-enum TransactionPurpose {
-  SHORT_STAY_BOOKING     // Réservation résidence meublée
-  MOVE_IN_PACKAGE        // Caution + Avance + Honoraires d'entrée
-  MONTHLY_RENT           // Paiement loyer mensuel
-  VISIT_FEE              // Frais de visite / dossier
-  SECURITY_DEPOSIT       // Dépôt de garantie
-}
-
 // -------------------------------------------------------------
 // CORE MODELS
 // -------------------------------------------------------------
@@ -140,7 +114,6 @@ model User {
   leasesAsTenant  LeaseAgreement[]  @relation("TenantLeases")
   leasesAsOwner   LeaseAgreement[]  @relation("OwnerLeases")
   visitsScheduled VisitAppointment[] @relation("TenantVisits")
-  transactions    Transaction[]
   favorites       SavedFavorite[]
   reviewsWritten  Review[]
   sessions        Session[]
@@ -240,7 +213,6 @@ model Property {
   visits          VisitAppointment[]
   favorites       SavedFavorite[]
   reviews         Review[]
-  transactions    Transaction[]
 
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
@@ -346,7 +318,6 @@ model Booking {
 
   property        Property       @relation(fields: [propertyId], references: [id])
   tenant          User           @relation(fields: [tenantId], references: [id])
-  transactions    Transaction[]
 
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
@@ -381,7 +352,6 @@ model LeaseAgreement {
   property          Property       @relation(fields: [propertyId], references: [id])
   tenant            User           @relation("TenantLeases", fields: [tenantId], references: [id])
   owner             User           @relation("OwnerLeases", fields: [ownerId], references: [id])
-  transactions      Transaction[]
 
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
@@ -402,6 +372,7 @@ model VisitAppointment {
   type          VisitType    @default(IN_PERSON)
   status        VisitStatus  @default(PENDING)
   notes         String?
+  adminMessage  String?      // Message de l'administrateur/propriétaire transmis au client (acceptation / refus)
   whatsappPhone String       // Pour rappels automatiques SMS/WhatsApp
 
   property      Property     @relation(fields: [propertyId], references: [id])
@@ -412,42 +383,6 @@ model VisitAppointment {
 
   @@index([propertyId, visitDate])
   @@index([tenantId])
-}
-
-// Mobile Money & Electronic Payments Logs
-model Transaction {
-  id                  String             @id @default(uuid())
-  reference           String             @unique // e.g. "TX-VFC-94827103"
-  gatewayReference    String?            // Référence externe Wave, Orange, CinetPay, Paystack
-  userId              String
-  propertyId          String?
-  bookingId           String?
-  leaseId             String?
-  
-  amountFcfa          Int
-  feeFcfa             Int                @default(0)
-  netAmountFcfa       Int
-  currency            String             @default("XOF")
-  paymentMethod       PaymentMethod
-  purpose             TransactionPurpose
-  status              TransactionStatus  @default(PENDING)
-  
-  payerPhone          String
-  payerName           String
-  metadata            String?            // Stockage JSON webhook payloads
-  
-  user                User               @relation(fields: [userId], references: [id])
-  property            Property?          @relation(fields: [propertyId], references: [id])
-  booking             Booking?           @relation(fields: [bookingId], references: [id])
-  lease               LeaseAgreement?    @relation(fields: [leaseId], references: [id])
-
-  createdAt           DateTime           @default(now())
-  updatedAt           DateTime           @updatedAt
-
-  @@index([reference])
-  @@index([userId])
-  @@index([status])
-  @@index([paymentMethod])
 }
 
 // User Saved Favorites
@@ -486,7 +421,7 @@ model Review {
 model AuditLog {
   id        String   @id @default(uuid())
   userId    String?
-  action    String   // e.g. "LOGIN", "PROPERTY_PUBLISH", "LEASE_SIGNED", "PAYMENT_RECEIVED"
+  action    String   // e.g. "LOGIN", "PROPERTY_PUBLISH", "LEASE_SIGNED", "VISIT_CONFIRMED"
   entity    String   // e.g. "USER", "PROPERTY", "TRANSACTION", "LEASE"
   entityId  String?
   ipAddress String?
@@ -505,7 +440,7 @@ model AuditLog {
 // l'absence d'administrateur connecté au moment de l'événement.
 model AdminNotification {
   id            String    @id @default(uuid())
-  type          String    @default("VISIT") // VISIT, PAYMENT, MODERATION…
+  type          String    @default("VISIT") // VISIT, MODERATION, LEASE…
   propertyId    String?   // Référence souple, sans clé étrangère : survit à la suppression du bien
   propertyTitle String
   commune       String?
@@ -524,35 +459,10 @@ model AdminNotification {
 // System Settings & Feature Flags
 model SystemSetting {
   id          String   @id @default(uuid())
-  key         String   @unique // e.g. "DEFAULT_CURRENCY", "LEGAL_ADVANCE_MONTHS", "WAVE_WEBHOOK_URL"
+  key         String   @unique // e.g. "DEFAULT_CURRENCY", "LEGAL_ADVANCE_MONTHS", "AGENCY_FEE_RATE"
   value       String
   description String?
   updatedAt   DateTime @updatedAt
-}
-
-// Certified Rent Receipts (Quittances de loyer) issued by landlords / agencies
-model Quittance {
-  id                    String        @id @default(uuid())
-  quittanceNumber       String        @unique // e.g. "QUIT-2026-11-0089"
-  month                 String
-  year                  Int
-  tenantName            String
-  tenantPhone           String
-  ownerName             String
-  propertyTitle         String
-  propertyAddress       String
-  commune               String
-  rentAmountFcfa        Int
-  chargesFcfa           Int           @default(0)
-  totalPaidFcfa         Int
-  paymentDate           DateTime
-  paymentMethod         PaymentMethod
-  transactionReference  String
-  qrCodeVerificationUrl String
-  createdAt             DateTime      @default(now())
-
-  @@index([quittanceNumber])
-  @@index([createdAt])
 }
 
 // Administrateur invité à rejoindre le Command Center.

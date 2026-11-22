@@ -3,7 +3,8 @@
  * High-Performance African Web Application
  *
  * Routing architecture (React Router v7):
- *  - PUBLIC            /, /accueil, /properties (+ /nos-biens alias), /properties/:id, /estimator
+ *  - PUBLIC            /, /accueil, /properties (+ /nos-biens alias), /properties/:id, /estimator,
+ *                      /avant-propos, /services
  *  - INFRASTRUCTURE    /architecture — live Neon PostgreSQL schema readout (never linked publicly)
  *  - LEGACY / 404      any unknown path redirects to /
  *  - AUTH PORTAL       /login, /register            (standalone liquid-glass shell)
@@ -21,6 +22,7 @@ import { PublicLayout } from './components/layout/PublicLayout.tsx';
 import { UserDashboardLayout } from './components/layout/UserDashboardLayout.tsx';
 import { AdminDashboardLayout } from './components/layout/AdminDashboardLayout.tsx';
 import { NotificationToasts } from './components/layout/NotificationToasts.tsx';
+import { ConfirmationModal } from './components/modals/ConfirmationModal.tsx';
 
 import { registerNavigate } from './router/navigation.ts';
 import { useAppStore } from './store/useAppStore.ts';
@@ -44,10 +46,6 @@ const InvitationAcceptPage = lazyPage(
   () => import('./pages/InvitationAcceptPage.tsx'),
   'InvitationAcceptPage'
 );
-const PhoneVerificationPage = lazyPage(
-  () => import('./pages/PhoneVerificationPage.tsx'),
-  'PhoneVerificationPage'
-);
 const FavoritesPage = lazyPage(() => import('./pages/FavoritesPage.tsx'), 'FavoritesPage');
 const MyRentalsPage = lazyPage(() => import('./pages/MyRentalsPage.tsx'), 'MyRentalsPage');
 const ProfileSettingsPage = lazyPage(
@@ -59,6 +57,12 @@ const SystemArchitecturePage = lazyPage(
   'SystemArchitecturePage'
 );
 const LegalPage = lazyPage(() => import('./pages/LegalPage.tsx'), 'LegalPage');
+const AvantProposPage = lazyPage(
+  () => import('./pages/AvantProposPage.tsx'),
+  'AvantProposPage'
+);
+const ServicesPage = lazyPage(() => import('./pages/ServicesPage.tsx'), 'ServicesPage');
+const NotFoundPage = lazyPage(() => import('./pages/NotFoundPage.tsx'), 'NotFoundPage');
 
 const PropertyWizardPage = lazyPage(
   () => import('./pages/dashboard/PropertyWizardPage.tsx'),
@@ -69,7 +73,6 @@ const PropertyManagePage = lazyPage(
   'PropertyManagePage'
 );
 const CalendarPage = lazyPage(() => import('./pages/dashboard/CalendarPage.tsx'), 'CalendarPage');
-const ReceiptsPage = lazyPage(() => import('./pages/dashboard/ReceiptsPage.tsx'), 'ReceiptsPage');
 
 const AdminOverviewPage = lazyPage(
   () => import('./pages/admin/AdminOverviewPage.tsx'),
@@ -88,13 +91,17 @@ const AdminPropertiesPage = lazyPage(
   () => import('./pages/admin/AdminPropertiesPage.tsx'),
   'AdminPropertiesPage'
 );
-const AdminTransactionsPage = lazyPage(
-  () => import('./pages/admin/AdminTransactionsPage.tsx'),
-  'AdminTransactionsPage'
-);
 const AdminAuditLogsPage = lazyPage(
   () => import('./pages/admin/AdminAuditLogsPage.tsx'),
   'AdminAuditLogsPage'
+);
+const AdminVisitsPage = lazyPage(
+  () => import('./pages/admin/AdminVisitsPage.tsx'),
+  'AdminVisitsPage'
+);
+const AdminSettingsPage = lazyPage(
+  () => import('./pages/admin/AdminSettingsPage.tsx'),
+  'AdminSettingsPage'
 );
 
 const PropertyExplorer = lazyPage(
@@ -162,9 +169,6 @@ export default function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
 
-          {/* Vérification du numéro après inscription self-service (code SMS). */}
-          <Route path="/verify-phone" element={<PhoneVerificationPage />} />
-
           {/* Invitation administrateur — page publique d'activation (lien reçu par e-mail). */}
           <Route path="/invitation" element={<InvitationAcceptPage />} />
 
@@ -186,6 +190,13 @@ export default function App() {
 
             {/* Live Neon PostgreSQL schema readout — reachable at its own URL, never linked publicly. */}
             <Route path="/architecture" element={<SystemArchitecturePage />} />
+
+            {/* Page institutionnelle « Avant-Propos » (entités & agréments du groupe VFC). */}
+            <Route path="/avant-propos" element={<AvantProposPage />} />
+            <Route path="/a-propos" element={<AvantProposPage />} />
+
+            {/* Page « Nos Services » (BTP, construction, gestion & aménagements). */}
+            <Route path="/services" element={<ServicesPage />} />
 
             {/* Pages réglementaires liées depuis le pied de page. */}
             <Route path="/legal/:section" element={<LegalPage />} />
@@ -216,8 +227,8 @@ export default function App() {
               }
             />
 
-            {/* Global 404 fallback: unknown paths are bounced back to the home page. */}
-            <Route path="*" element={<Navigate to="/" replace />} />
+            {/* 404 handler for unknown public paths */}
+            <Route path="*" element={<NotFoundPage />} />
           </Route>
 
           {/* ---------- LANDLORD / AGENCE WORKSPACE (OWNER | AGENT | ADMIN) ---------- */}
@@ -234,7 +245,6 @@ export default function App() {
             <Route path="properties/:id/edit" element={<PropertyWizardPage />} />
             <Route path="properties/manage" element={<PropertyManagePage />} />
             <Route path="calendar" element={<CalendarPage />} />
-            <Route path="receipts" element={<ReceiptsPage />} />
           </Route>
 
           {/* ---------- SUPER-ADMIN COMMAND CENTER (ADMIN ONLY) ---------- */}
@@ -251,15 +261,16 @@ export default function App() {
             <Route path="invitations" element={<AdminInvitationsPage />} />
             <Route path="moderation" element={<AdminModerationPage />} />
             <Route path="properties" element={<AdminPropertiesPage />} />
-            <Route path="transactions" element={<AdminTransactionsPage />} />
+            <Route path="visits" element={<AdminVisitsPage />} />
             <Route path="audit-logs" element={<AdminAuditLogsPage />} />
+            <Route path="settings" element={<AdminSettingsPage />} />
           </Route>
         </Routes>
         </React.Suspense>
 
-        {/* Liquid Glass notifications — mounted at shell level so route guards
-            and any nested page can raise alerts from anywhere. */}
+        {/* Liquid Glass notifications & confirmation dialogs — mounted at shell level */}
         <NotificationToasts />
+        <ConfirmationModal />
       </AuthProvider>
     </BrowserRouter>
   );
